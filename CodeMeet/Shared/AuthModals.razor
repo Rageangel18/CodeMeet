@@ -1,0 +1,230 @@
+﻿@using CodeMeet.Services
+@using Microsoft.JSInterop
+
+@inject AuthModalState AuthModalState
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+@implements IDisposable
+
+@if (AuthModalState.IsLoginOpen)
+{
+    <div class="cm-modal-backdrop" @onclick="Close">
+        <div class="cm-modal" @onclick:stopPropagation="true">
+            <div class="cm-modal-header">
+                <h2>Login</h2>
+                <button type="button" class="cm-modal-close" @onclick="Close">×</button>
+            </div>
+
+            <div class="cm-modal-body">
+                <div class="cm-form-field">
+                    <label>Email</label>
+                    <input type="email" @bind="_loginEmail" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Password</label>
+                    <input type="password" @bind="_loginPassword" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(_loginError))
+                {
+                    <div class="cm-form-error">@_loginError</div>
+                }
+            </div>
+
+            <div class="cm-modal-footer">
+                <button type="button"
+                        class="cm-btn-ghost"
+                        @onclick="OpenRegisterFromLogin">
+                    Need an account? Register
+                </button>
+
+                <button type="button"
+                        class="cm-btn-primary"
+                        disabled="@_loginLoading"
+                        @onclick="HandleLoginAsync">
+                    @(_loginLoading ? "Signing in..." : "Login")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (AuthModalState.IsRegisterOpen)
+{
+    <div class="cm-modal-backdrop" @onclick="Close">
+        <div class="cm-modal" @onclick:stopPropagation="true">
+            <div class="cm-modal-header">
+                <h2>Register</h2>
+                <button type="button" class="cm-modal-close" @onclick="Close">×</button>
+            </div>
+
+            <div class="cm-modal-body">
+                <div class="cm-form-field">
+                    <label>Email</label>
+                    <input type="email" @bind="_regEmail" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Display name</label>
+                    <input type="text" @bind="_regDisplayName" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Password</label>
+                    <input type="password" @bind="_regPassword" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Confirm password</label>
+                    <input type="password" @bind="_regConfirmPassword" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(_regError))
+                {
+                    <div class="cm-form-error">@_regError</div>
+                }
+            </div>
+
+            <div class="cm-modal-footer">
+                <button type="button"
+                        class="cm-btn-ghost"
+                        @onclick="OpenLoginFromRegister">
+                    Already have an account? Login
+                </button>
+
+                <button type="button"
+                        class="cm-btn-primary"
+                        disabled="@_regLoading"
+                        @onclick="HandleRegisterAsync">
+                    @(_regLoading ? "Creating..." : "Register")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _loginEmail = string.Empty;
+    private string _loginPassword = string.Empty;
+    private string? _loginError;
+    private bool _loginLoading;
+
+    private string _regEmail = string.Empty;
+    private string _regDisplayName = string.Empty;
+    private string _regPassword = string.Empty;
+    private string _regConfirmPassword = string.Empty;
+    private string? _regError;
+    private bool _regLoading;
+
+    protected override void OnInitialized()
+    {
+        AuthModalState.OnChange += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        AuthModalState.OnChange -= StateHasChanged;
+    }
+
+    private void Close()
+    {
+        _loginError = null;
+        _regError = null;
+        AuthModalState.Close();
+    }
+
+    private void OpenRegisterFromLogin()
+    {
+        _loginError = null;
+        AuthModalState.OpenRegister();
+    }
+
+    private void OpenLoginFromRegister()
+    {
+        _regError = null;
+        AuthModalState.OpenLogin();
+    }
+
+    private async Task HandleLoginAsync()
+    {
+        _loginError = null;
+
+        var email = _loginEmail.Trim();
+        var password = _loginPassword;
+
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        {
+            _loginError = "Email and password are required.";
+            return;
+        }
+
+        _loginLoading = true;
+
+        try
+        {
+            await JS.InvokeVoidAsync("codeMeetAuth.login", email, password);
+
+            Close();
+            Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+        }
+        catch (JSException jsEx)
+        {
+            _loginError = jsEx.Message;
+        }
+        catch (Exception ex)
+        {
+            _loginError = $"Login failed: {ex.Message}";
+        }
+        finally
+        {
+            _loginLoading = false;
+        }
+    }
+
+    private async Task HandleRegisterAsync()
+    {
+        _regError = null;
+
+        var email = _regEmail.Trim();
+        var displayName = _regDisplayName.Trim();
+        var password = _regPassword;
+        var confirm = _regConfirmPassword;
+
+        if (string.IsNullOrWhiteSpace(email) ||
+            string.IsNullOrWhiteSpace(displayName) ||
+            string.IsNullOrWhiteSpace(password))
+        {
+            _regError = "Email, display name and password are required.";
+            return;
+        }
+
+        if (password != confirm)
+        {
+            _regError = "Passwords do not match.";
+            return;
+        }
+
+        _regLoading = true;
+
+        try
+        {
+            await JS.InvokeVoidAsync("codeMeetAuth.register", email, displayName, password, confirm);
+            Close();
+            Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+        }
+        catch (JSException jsEx)
+        {
+            _regError = jsEx.Message;
+        }
+        catch (Exception ex)
+        {
+            _regError = $"Registration failed: {ex.Message}";
+        }
+        finally
+        {
+            _regLoading = false;
+        }
+    }
+}

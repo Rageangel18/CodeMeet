@@ -1,0 +1,203 @@
+﻿@page "/sessions/live"
+@page "/sessions/live/{SessionId:guid}"
+
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager Navigation
+@inject HttpClient Http
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Live interview (demo)</h1>
+            <div class="cm-page-subtitle">
+                Session chat test. Open this page in two browsers and send a message.
+            </div>
+        </div>
+
+        <div class="cm-badge-status">
+            @_connectionStatus
+        </div>
+    </div>
+
+    <div class="cm-live-layout">
+        <section class="cm-live-main">
+            <div class="cm-card-title">Coding area (placeholder)</div>
+            <p class="cm-feature-text">
+                Later here will be code editor, preview, runner, etc.
+                For now this is just a stub for the left side.
+            </p>
+        </section>
+
+        <aside class="cm-live-chat">
+            <div class="cm-live-chat-header">
+                Session chat<br />
+                <span class="cm-section-subtitle">
+                    Session ID: @_sessionKey
+                </span>
+            </div>
+
+            <div class="cm-live-chat-messages">
+                @if (_messages.Count == 0)
+                {
+                    <div class="cm-live-chat-message">
+                        <div class="cm-live-chat-meta">
+                            <span>System</span>
+                            <span>@DateTime.UtcNow.ToShortTimeString()</span>
+                        </div>
+                        <div class="cm-live-chat-text">
+                            No messages yet. Type something below.
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var msg in _messages)
+                    {
+                        <div class="cm-live-chat-message">
+                            <div class="cm-live-chat-meta">
+                                <span>@msg.UserName</span>
+                                <span>@msg.SentAtLocal.ToShortTimeString()</span>
+                            </div>
+                            <div class="cm-live-chat-text">
+                                @msg.Text
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="cm-live-chat-input-row">
+                <input class="cm-live-chat-input"
+                       placeholder="Type a message..."
+                       @bind="_outgoingMessage"
+                       @bind:event="oninput"
+                       @onkeydown="HandleKeyDown" />
+
+                <button class="cm-btn-primary cm-btn-small"
+                        disabled="@_sendDisabled"
+                        @onclick="SendAsync">
+                    Send
+                </button>
+            </div>
+        </aside>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public Guid? SessionId { get; set; }
+
+    private HubConnection? _hubConnection;
+    private string _sessionKey = "demo-session"; // то, что реально пойдёт в SignalR
+    private string _connectionStatus = "Connecting…";
+
+    private readonly List<ChatMessageVm> _messages = new();
+    private string _outgoingMessage = string.Empty;
+    private bool _sendDisabled => string.IsNullOrWhiteSpace(_outgoingMessage) || _hubConnection is null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // выбираем ключ сессии
+        _sessionKey = SessionId.HasValue && SessionId.Value != Guid.Empty
+            ? SessionId.Value.ToString()
+            : "demo-session";
+
+        // если уже есть коннект - пересоздавать не будем
+        if (_hubConnection is null)
+        {
+            await InitConnectionAsync();
+        }
+    }
+
+    private async Task InitConnectionAsync()
+    {
+        _connectionStatus = "Connecting…";
+
+        var hubUrl = Navigation.ToAbsoluteUri("/hubs/session");
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(hubUrl)
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<string, string, DateTime>(
+            "ChatMessageReceived",
+            (user, text, utc) =>
+            {
+                _messages.Add(new ChatMessageVm
+                    {
+                        UserName = user,
+                        Text = text,
+                        SentAtUtc = utc
+                    });
+
+                InvokeAsync(StateHasChanged);
+            });
+
+        _hubConnection.Reconnecting += error =>
+        {
+            _connectionStatus = "Reconnecting…";
+            InvokeAsync(StateHasChanged);
+            return Task.CompletedTask;
+        };
+
+        _hubConnection.Reconnected += connectionId =>
+        {
+            _connectionStatus = "Connected";
+            InvokeAsync(StateHasChanged);
+            return Task.CompletedTask;
+        };
+
+        _hubConnection.Closed += async error =>
+        {
+            _connectionStatus = "Disconnected";
+            InvokeAsync(StateHasChanged);
+            // можно будет решить, надо ли автопереподключение руками
+            await Task.CompletedTask;
+        };
+
+        await _hubConnection.StartAsync();
+        await _hubConnection.SendAsync("JoinSession", _sessionKey);
+
+        _connectionStatus = "Connected";
+    }
+
+    private async Task SendAsync()
+    {
+        if (_hubConnection is null)
+            return;
+
+        var text = _outgoingMessage.Trim();
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        await _hubConnection.SendAsync("SendChatMessage", _sessionKey, text);
+
+        _outgoingMessage = string.Empty;
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.SendAsync("LeaveSession", _sessionKey);
+            await _hubConnection.DisposeAsync();
+        }
+    }
+
+    private sealed class ChatMessageVm
+    {
+        public string UserName { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+        public DateTime SentAtUtc { get; set; }
+        public DateTime SentAtLocal => SentAtUtc.ToLocalTime();
+    }
+}

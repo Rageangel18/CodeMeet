@@ -1,0 +1,200 @@
+﻿@page "/admin/users"
+
+@page "/admin/users/index"
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using CodeMeet.BLL.Dtos.Admin
+@using CodeMeet.BLL.Services.Admin
+@attribute [Authorize]
+
+@inject IAdminUserService UserService
+
+@inject NavigationManager Nav
+<PageTitle>Admin – Users</PageTitle>
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Users</h1>
+            <p class="cm-page-subtitle">
+                View and manage users registered in the system.
+            </p>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <p>Loading users…</p>
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="cm-alert cm-alert-error">@errorMessage</div>
+    }
+    else
+    {
+        <div class="cm-admin-two-column">
+            <!-- List -->
+            <div class="cm-admin-card">
+                <h2 class="cm-card-title">All users</h2>
+
+                @if (users.Count == 0)
+                {
+                    <p>No users found.</p>
+                }
+                else
+                {
+                    <table class="cm-table">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Name</th>
+                                <th>Active</th>
+                                <th>Created</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var u in users)
+                            {
+                                <tr class="@GetRowClass(u.Id)">
+                                    <td>@u.Email</td>
+                                    <td>@u.DisplayName</td>
+                                    <td>
+                                        @(u.IsActive ? "Yes" : "No")
+                                    </td>
+                                    <td>@u.CreatedUtc.ToString("yyyy-MM-dd")</td>
+                                    <td>
+                                        <button type="button" class="cm-link-button" @onclick="() => StartEdit(u)">
+                                            Edit
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+
+            <!-- Form -->
+            <div class="cm-admin-card">
+                <h2 class="cm-card-title">Edit user</h2>
+
+                @if (selectedUser is null)
+                {
+                    <p>Select a user from the list to edit.</p>
+                }
+                else
+                {
+                    <EditForm Model="@userForm" OnValidSubmit="@HandleSubmit">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="cm-form-field">
+                            <label class="cm-label">Email</label>
+                            <div class="cm-input cm-input-static">@selectedUser.Email</div>
+                        </div>
+
+                        <div class="cm-form-field">
+                            <label class="cm-label">Display name</label>
+                            <InputText class="cm-input" @bind-Value="userForm.DisplayName" />
+                        </div>
+
+                        <div class="cm-form-field cm-form-field-inline">
+                            <InputCheckbox class="cm-checkbox" @bind-Value="userForm.IsActive" />
+                            <label class="cm-label-inline">Active</label>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(formError))
+                        {
+                            <div class="cm-alert cm-alert-error">@formError</div>
+                        }
+
+                        <div class="cm-form-actions">
+                            <button type="button" class="cm-btn cm-btn-primary" disabled="@isSaving">
+                                Save changes
+                            </button>
+                        </div>
+                    </EditForm>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<AdminUserDto> users = new();
+    private AdminUserDto? selectedUser;
+    private AdminUserUpdateRequest userForm = new();
+    private bool isLoading;
+    private bool isSaving;
+    private string? errorMessage;
+    private string? formError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            var list = await UserService.GetAllAsync();
+            users = list.ToList();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to load users: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void StartEdit(AdminUserDto user)
+    {
+        selectedUser = user;
+        userForm = new AdminUserUpdateRequest
+            {
+                DisplayName = user.DisplayName,
+                IsActive = user.IsActive
+            };
+        formError = null;
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (selectedUser is null)
+            return;
+
+        isSaving = true;
+        formError = null;
+
+        try
+        {
+            var updated = await UserService.UpdateAsync(selectedUser.Id, userForm);
+
+            var idx = users.FindIndex(u => u.Id == updated.Id);
+            if (idx >= 0)
+                users[idx] = updated;
+
+            selectedUser = updated;
+        }
+        catch (Exception ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private string? GetRowClass(Guid id)
+        => selectedUser?.Id == id ? "cm-table-row-active" : null;
+}

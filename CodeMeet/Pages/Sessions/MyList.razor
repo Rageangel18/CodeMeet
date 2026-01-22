@@ -1,0 +1,219 @@
+﻿@page "/sessions/my"
+@attribute [Authorize]
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using CodeMeet.BLL.DTOs.Sessions
+@using CodeMeet.DAL.Enums
+@using CodeMeet.BLL.Services.Interfaces
+
+@inject ISessionService SessionService
+@inject NavigationManager Nav
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">My sessions</h1>
+            <p class="cm-page-subtitle">
+                You see only sessions where you are a participant.
+            </p>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_roleInfo))
+    {
+        <p class="cm-field-hint">
+            Role(s): @_roleInfo
+        </p>
+    }
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="cm-alert cm-alert-error">@_error</div>
+    }
+    else if (_loading)
+    {
+        <p>Loading sessions…</p>
+    }
+    else if (_sessions is null || _sessions.Count == 0)
+    {
+        <div class="cm-alert">
+            You have no sessions yet.
+        </div>
+    }
+    else
+    {
+        <div class="cm-filter-bar">
+            <span class="cm-filter-label">Status</span>
+
+            <button class="@GetFilterClass(null)"
+                    @onclick="() => SetFilterAsync(null)">
+                All
+            </button>
+
+            <button class="@GetFilterClass(SessionStatus.Scheduled)"
+                    @onclick="() => SetFilterAsync(SessionStatus.Scheduled)">
+                Scheduled
+            </button>
+
+            <button class="@GetFilterClass(SessionStatus.Live)"
+                    @onclick="() => SetFilterAsync(SessionStatus.Live)">
+                Live
+            </button>
+
+            <button class="@GetFilterClass(SessionStatus.Completed)"
+                    @onclick="() => SetFilterAsync(SessionStatus.Completed)">
+                Completed
+            </button>
+        </div>
+
+        <table class="cm-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Status</th>
+                    <th>Start (UTC)</th>
+                    <th>End (UTC)</th>
+                    <th style="width: 260px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var s in _sessions)
+                {
+                    <tr>
+                        <td>@s.Title</td>
+                        <td><span class="cm-tag">@s.Status</span></td>
+                        <td>@(s.ScheduledStartUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                        <td>@(s.ScheduledEndUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                        <td>
+                            <button class="cm-btn-ghost cm-btn-xxs"
+                                    @onclick="@(() => OpenDetails(s.SessionId))">
+                                Details
+                            </button>
+
+                            @if (s.Status == SessionStatus.Live)
+                            {
+                                <button class="cm-btn-primary cm-btn-xxs"
+                                        style="margin-left: 4px;"
+                                        @onclick="@(() => JoinSession(s.SessionId))">
+                                    Join
+                                </button>
+                            }
+
+                            @if (s.Status == SessionStatus.Completed)
+                            {
+                                <button class="cm-btn-ghost cm-btn-xxs"
+                                        style="margin-left: 4px;"
+                                        @onclick="@(() => OpenSummary(s.SessionId))">
+                                    Summary
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private Guid? _userId;
+    private HashSet<string> _roles = new(StringComparer.OrdinalIgnoreCase);
+    private string? _roleInfo;
+
+    private List<SessionSummaryDto>? _sessions;
+    private bool _loading;
+    private string? _error;
+    private SessionStatus? _statusFilter;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateTask;
+        var user = authState.User;
+
+        if (user.Identity is null || !user.Identity.IsAuthenticated)
+        {
+            _error = "You must be signed in.";
+            return;
+        }
+
+        var idClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+        if (idClaim is null || !Guid.TryParse(idClaim.Value, out var userId))
+        {
+            _error = "User id claim is missing.";
+            return;
+        }
+
+        _userId = userId;
+
+        foreach (var c in user.Claims.Where(c =>
+                     c.Type == ClaimTypes.Role || c.Type == "role"))
+        {
+            _roles.Add(c.Value);
+        }
+
+        _roleInfo = _roles.Count == 0 ? "no org role" : string.Join(", ", _roles);
+
+        await LoadSessionsAsync();
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        if (_userId is null)
+            return;
+
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            var list = await SessionService.GetByUserParticipationAsync(_userId.Value, _statusFilter);
+            _sessions = list.ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load sessions: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetFilterAsync(SessionStatus? status)
+    {
+        if (_statusFilter == status)
+            return;
+
+        _statusFilter = status;
+        await LoadSessionsAsync();
+    }
+
+    private string GetFilterClass(SessionStatus? status)
+    {
+        var isActive = _statusFilter == status
+                       || (_statusFilter is null && status is null);
+
+        return isActive ? "cm-header-btn cm-header-btn-primary"
+                        : "cm-header-btn";
+    }
+
+    private void OpenDetails(Guid id)
+    {
+        Nav.NavigateTo($"/sessions/{id}");
+    }
+
+    private void JoinSession(Guid id)
+    {
+        Nav.NavigateTo($"/sessions/{id}/prejoin");
+    }
+
+    private void OpenSummary(Guid id)
+    {
+        Nav.NavigateTo($"/sessions/{id}/summary");
+    }
+}

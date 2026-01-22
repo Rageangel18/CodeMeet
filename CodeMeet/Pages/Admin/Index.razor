@@ -1,0 +1,44 @@
+@page "/admin"
+
+@page "/admin/index"
+
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+
+@inject NavigationManager Nav
+
+<PageTitle>Admin Dashboard</PageTitle>
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Admin dashboard</h1>
+            <p class="cm-page-subtitle">
+                Manage organizations and users for the CodeMeet platform.
+            </p>
+        </div>
+    </div>
+
+    <div class="cm-admin-grid">
+        <div class="cm-admin-card">
+            <h2>Organizations</h2>
+            <p>
+                View and manage organizations, quotas, and settings.
+            </p>
+            <NavLink class="cm-btn cm-btn-secondary" href="@Nav.ToAbsoluteUri("admin/organizations").ToString()">
+                Open organizations
+            </NavLink>
+        </div>
+
+        <div class="cm-admin-card">
+            <h2>Users</h2>
+            <p>
+                View all users, edit display names and toggle active status.
+            </p>
+            <NavLink class="cm-btn cm-btn-secondary" href="@Nav.ToAbsoluteUri("admin/users").ToString()">
+                Open users
+            </NavLink>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,766 @@
+﻿@page "/sessions/{SessionId:guid}/summary"
+@attribute [Authorize]
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using CodeMeet.BLL.DTOs.Sessions
+@using CodeMeet.BLL.DTOs.Participants
+@using CodeMeet.BLL.DTOs.Feedback
+@using CodeMeet.BLL.DTOs.Questions
+@using CodeMeet.BLL.DTOs.Tags
+@using CodeMeet.BLL.Services.Interfaces
+@using CodeMeet.DAL.Enums
+
+@inject ISessionReportService SessionReportService
+@inject IParticipantService ParticipantService
+@inject IFeedbackService FeedbackService
+@inject IQuestionService QuestionService
+@inject ITagService TagService
+@inject NavigationManager Nav
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">@(_summary?.Title ?? "Session summary")</h1>
+
+            @if (_summary is not null)
+            {
+                <p class="cm-page-subtitle">
+                    Status: @_summary.Status
+                    @if (_summary.ScheduledStartUtc.HasValue)
+                    {
+                        <span> - Start: @_summary.ScheduledStartUtc.Value.ToString("yyyy-MM-dd HH:mm") (UTC)</span>
+                    }
+                    @if (_summary.ScheduledEndUtc.HasValue)
+                    {
+                        <span> - End: @_summary.ScheduledEndUtc.Value.ToString("yyyy-MM-dd HH:mm") (UTC)</span>
+                    }
+                </p>
+            }
+            else
+            {
+                <p class="cm-page-subtitle">Session summary and review.</p>
+            }
+        </div>
+
+        <div class="cm-form-actions">
+            <button class="cm-btn-ghost cm-btn-small" @onclick="BackToSessions">- Back</button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="cm-alert cm-alert-error">@_error</div>
+    }
+    else if (_loading)
+    {
+        <p>Loading summary…</p>
+    }
+    else if (_summary is null)
+    {
+        <div class="cm-alert cm-alert-error">Session not found.</div>
+    }
+    else if (!_canViewSummary)
+    {
+        <div class="cm-alert">
+            You do not have access to this session summary.
+        </div>
+    }
+    else
+    {
+        @if (!IsCompleted)
+        {
+            <div class="cm-alert cm-alert-warning">
+                Session is not completed yet. Some sections can be read-only.
+            </div>
+        }
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:24px; margin-top:16px;">
+
+            @* Interviewer-only: feedback form *@
+            @if (ShowFeedbackForm)
+            {
+                <div class="cm-admin-card">
+                    <h2 class="cm-section-title">Candidate review</h2>
+                    <p class="cm-section-subtitle">
+                        Leave your feedback and recommendation about the candidate you interviewed.
+                    </p>
+
+                    @if (!string.IsNullOrEmpty(_feedbackError))
+                    {
+                        <div class="cm-alert cm-alert-error">@_feedbackError</div>
+                    }
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Candidate</label>
+                        @if (_candidates.Count == 0)
+                        {
+                            <div class="cm-field-hint">No candidates found in this session.</div>
+                        }
+                        else
+                        {
+                            <select class="cm-input"
+                                    @bind="_selectedCandidateParticipantId"
+                                    disabled="@(!IsCompleted || _savingFeedback || _hasMyFeedback)">
+                                <option value="">Select candidate…</option>
+                                @foreach (var c in _candidates)
+                                {
+                                    <option value="@c.Id">@GetParticipantLabel(c)</option>
+                                }
+                            </select>
+                            <div class="cm-field-hint">Which participant you are reviewing.</div>
+                        }
+                    </div>
+
+                    <div class="cm-form-row-3">
+                        <div class="cm-form-field">
+                            <label class="cm-label">Overall</label>
+                            <input type="number"
+                                   class="cm-input"
+                                   step="0.5" min="0" max="10"
+                                   @bind="_scoreOverall"
+                                   disabled="@(!IsCompleted || _savingFeedback || _hasMyFeedback)" />
+                            <div class="cm-field-hint">0-10</div>
+                        </div>
+
+                        <div class="cm-form-field">
+                            <label class="cm-label">Tech</label>
+                            <input type="number"
+                                   class="cm-input"
+                                   step="0.5" min="0" max="10"
+                                   @bind="_scoreTech"
+                                   disabled="@(!IsCompleted || _savingFeedback || _hasMyFeedback)" />
+                        </div>
+
+                        <div class="cm-form-field">
+                            <label class="cm-label">Communication</label>
+                            <input type="number"
+                                   class="cm-input"
+                                   step="0.5" min="0" max="10"
+                                   @bind="_scoreComm"
+                                   disabled="@(!IsCompleted || _savingFeedback || _hasMyFeedback)" />
+                        </div>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Recommendation</label>
+                        <select class="cm-input"
+                                @bind="_recommendation"
+                                disabled="@(!IsCompleted || _savingFeedback || _hasMyFeedback)">
+                            <option value="@Recommendation.Hire">Hire</option>
+                            <option value="@Recommendation.Reject">Reject</option>
+                            <option value="@Recommendation.Hold">Hold</option>
+                        </select>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Strengths</label>
+                        <textarea class="cm-input cm-textarea"
+                                  rows="4"
+                                  @bind="_strengths"
+                                  disabled="@(!IsCompleted || _savingFeedback || _hasMyFeedback)"></textarea>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Concerns</label>
+                        <textarea class="cm-input cm-textarea"
+                                  rows="4"
+                                  @bind="_concerns"
+                                  disabled="@(!IsCompleted || _savingFeedback || _hasMyFeedback)"></textarea>
+                    </div>
+
+                    <div class="cm-form-actions">
+                        <button class="cm-btn-primary"
+                                @onclick="SaveFeedbackAsync"
+                                disabled="@(!_isInterviewer || !IsCompleted || _savingFeedback || _hasMyFeedback)">
+                            @(_savingFeedback ? "Saving..." : "Save feedback")
+                        </button>
+                    </div>
+                </div>
+            }
+
+            @* Stats and summary: visible to interviewer/admin/candidate-participant *@
+            <div class="cm-admin-card">
+                <h2 class="cm-section-title">Session stats & feedback</h2>
+
+                <div class="cm-summary-block cm-summary-block-first">
+                    <div class="cm-summary-block-header">Timing</div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Created</div>
+                        <div class="cm-summary-value">@_summary.CreatedUtc.ToString("yyyy-MM-dd HH:mm") (UTC)</div>
+                    </div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Start</div>
+                        <div class="cm-summary-value">@(_summary.ScheduledStartUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</div>
+                    </div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">End</div>
+                        <div class="cm-summary-value">@(_summary.ScheduledEndUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</div>
+                    </div>
+                </div>
+
+                <div class="cm-summary-block">
+                    <div class="cm-summary-block-header">Participants</div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Candidates</div>
+                        <div class="cm-summary-value">@_summary.CandidateCount</div>
+                    </div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Interviewers</div>
+                        <div class="cm-summary-value">@_summary.InterviewerCount</div>
+                    </div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Observers</div>
+                        <div class="cm-summary-value">@_summary.ObserverCount</div>
+                    </div>
+                </div>
+
+                <div class="cm-summary-block">
+                    <div class="cm-summary-block-header">Average scores</div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Avg overall</div>
+                        <div class="cm-summary-value">@(_summary.AvgScoreOverall?.ToString("0.0") ?? "-")</div>
+                    </div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Avg tech</div>
+                        <div class="cm-summary-value">@(_summary.AvgScoreTech?.ToString("0.0") ?? "-")</div>
+                    </div>
+                    <div class="cm-summary-row">
+                        <div class="cm-summary-label">Avg comm</div>
+                        <div class="cm-summary-value">@(_summary.AvgScoreComm?.ToString("0.0") ?? "-")</div>
+                    </div>
+                </div>
+
+                @* "Your feedback" - only for interviewer who submitted feedback *@
+                @if (MyFeedback is not null)
+                {
+                    <div class="cm-summary-block">
+                        <div class="cm-summary-block-header">Your feedback</div>
+
+                        <div class="cm-summary-row">
+                            <div class="cm-summary-label">Candidate</div>
+                            <div class="cm-summary-value">@GetParticipantDisplayName(MyFeedback.CandidateParticipantId)</div>
+                        </div>
+
+                        <div class="cm-summary-row">
+                            <div class="cm-summary-label">Overall</div>
+                            <div class="cm-summary-value">@(MyFeedback.ScoreOverall?.ToString("0.0") ?? "-")</div>
+                        </div>
+                        <div class="cm-summary-row">
+                            <div class="cm-summary-label">Tech</div>
+                            <div class="cm-summary-value">@(MyFeedback.ScoreTech?.ToString("0.0") ?? "-")</div>
+                        </div>
+                        <div class="cm-summary-row">
+                            <div class="cm-summary-label">Comm</div>
+                            <div class="cm-summary-value">@(MyFeedback.ScoreComm?.ToString("0.0") ?? "-")</div>
+                        </div>
+                        <div class="cm-summary-row">
+                            <div class="cm-summary-label">Recommendation</div>
+                            <div class="cm-summary-value">@MyFeedback.Recommendation</div>
+                        </div>
+                    </div>
+                }
+
+                @* Feedback summary (aggregate) - visible to allowed viewers *@
+                <div class="cm-summary-block">
+                    <div class="cm-summary-block-header">Feedback summary</div>
+
+                    <div class="cm-summary-subtitle">Strengths</div>
+                    <div class="cm-summary-textbox">
+                        @if (!string.IsNullOrWhiteSpace(_summary.StrengthsSummary))
+                        {
+                            @_summary.StrengthsSummary
+                        }
+                        else
+                        {
+                            <span class="cm-field-hint">No strengths recorded yet.</span>
+                        }
+                    </div>
+
+                    <div style="height:10px;"></div>
+
+                    <div class="cm-summary-subtitle">Concerns</div>
+                    <div class="cm-summary-textbox">
+                        @if (!string.IsNullOrWhiteSpace(_summary.ConcernsSummary))
+                        {
+                            @_summary.ConcernsSummary
+                        }
+                        else
+                        {
+                            <span class="cm-field-hint">No concerns recorded.</span>
+                        }
+                    </div>
+                </div>
+
+                @* Candidate-only: show feedback entries about the current candidate *@
+                @if (_isCandidate && _myCandidateParticipantId.HasValue)
+                {
+                    <div class="cm-summary-block">
+                        <div class="cm-summary-block-header">Feedback for you</div>
+
+                        @if (MyCandidateFeedback.Count == 0)
+                        {
+                            <div class="cm-alert">No feedback yet.</div>
+                        }
+                        else
+                        {
+                            <div class="cm-list">
+                                @foreach (var f in MyCandidateFeedback.OrderByDescending(x => x.CreatedUtc))
+                                {
+                                    <div class="cm-list-row">
+                                        <div class="cm-list-main">
+                                            <div class="cm-list-title">
+                                                Recommendation: @f.Recommendation
+                                            </div>
+                                            <div class="cm-list-subtitle">
+                                                Overall: @(f.ScoreOverall?.ToString("0.0") ?? "-"),
+                                                Tech: @(f.ScoreTech?.ToString("0.0") ?? "-"),
+                                                Comm: @(f.ScoreComm?.ToString("0.0") ?? "-")
+                                                - @(f.CreatedUtc.ToString("yyyy-MM-dd HH:mm")) (UTC)
+                                            </div>
+
+                                            @if (!string.IsNullOrWhiteSpace(f.Strengths))
+                                            {
+                                                <div class="cm-field-hint" style="margin-top:6px;">Strengths:</div>
+                                                <div class="cm-summary-textbox" style="min-height:auto;">@f.Strengths</div>
+                                            }
+
+                                            @if (!string.IsNullOrWhiteSpace(f.Concerns))
+                                            {
+                                                <div class="cm-field-hint" style="margin-top:6px;">Concerns:</div>
+                                                <div class="cm-summary-textbox" style="min-height:auto;">@f.Concerns</div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @* Questions asked: everyone can view, only interviewer can edit and save *@
+            <div class="cm-admin-card">
+                <h2 class="cm-section-title">Questions asked</h2>
+                <p class="cm-section-subtitle">
+                    Questions attached to this session.
+                    @if (_isInterviewer)
+                    {
+                        <span> - As interviewer, you can edit after session completion.</span>
+                    }
+                </p>
+
+                @if (!string.IsNullOrEmpty(_questionsError))
+                {
+                    <div class="cm-alert cm-alert-error">@_questionsError</div>
+                }
+
+                <div class="cm-form-field">
+                    <label class="cm-label">Currently attached</label>
+
+                    @if (_assignedQuestions.Count == 0)
+                    {
+                        <div class="cm-field-hint">No questions attached yet.</div>
+                    }
+                    else
+                    {
+                        <ul class="cm-list">
+                            @foreach (var q in _assignedQuestions)
+                            {
+                                <li>
+                                    <div class="cm-question-pill">
+                                        <div class="cm-question-title">@q.Title</div>
+                                        <div class="cm-question-meta">Level: @q.Level</div>
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+
+                @if (_isInterviewer)
+                {
+                    <hr />
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Search in question bank</label>
+                        <input class="cm-input"
+                               placeholder="Search by title or body…"
+                               @bind="_questionSearch"
+                               @bind:event="oninput"
+                               disabled="@(!IsCompleted)" />
+                        <div class="cm-field-hint">
+                            Use checkboxes to mark which ones were asked.
+                        </div>
+                    </div>
+
+                    <div class="cm-question-bank-list">
+                        @if (_allQuestions.Count == 0)
+                        {
+                            <div class="cm-field-hint">No questions in organization yet.</div>
+                        }
+                        else
+                        {
+                            @foreach (var q in FilteredQuestions)
+                            {
+                                <div class="cm-question-row">
+                                    <label class="cm-checkbox-label">
+                                        <input type="checkbox"
+                                               checked="@_selectedQuestionIds.Contains(q.Id)"
+                                               disabled="@(!IsCompleted || _savingQuestions)"
+                                               @onchange="e => ToggleQuestionSelection(q.Id, e.Value)" />
+                                        <span class="cm-question-title">@q.Title</span>
+                                    </label>
+                                    <div class="cm-question-meta">Level: @q.Level</div>
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    <div class="cm-form-actions" style="margin-top:12px;">
+                        <button class="cm-btn-primary"
+                                @onclick="SaveQuestionsAsync"
+                                disabled="@(!_isInterviewer || !IsCompleted || _savingQuestions)">
+                            @(_savingQuestions ? "Saving..." : "Save questions")
+                        </button>
+                    </div>
+                }
+            </div>
+
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid SessionId { get; set; }
+
+    [CascadingParameter] public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private SessionSummaryDto? _summary;
+    private List<ParticipantDto> _participants = new();
+    private List<ParticipantDto> _candidates = new();
+    private List<FeedbackDto> _feedback = new();
+
+    private List<QuestionDto> _allQuestions = new();
+    private List<QuestionDto> _assignedQuestions = new();
+    private List<TagDto> _tags = new();
+
+    private Guid? _currentUserId;
+    private string? _currentUserEmail;
+    private string? _currentUserName;
+
+    private bool _isInterviewer;
+    private bool _isCandidate;
+    private bool _isAdmin;
+    private bool _canViewSummary;
+
+    private Guid? _myCandidateParticipantId;
+
+    private bool _loading = true;
+    private string? _error;
+
+    private bool IsCompleted =>
+        _summary is not null &&
+        (_summary.Status == SessionStatus.Completed ||
+         (_summary.ScheduledEndUtc.HasValue && _summary.ScheduledEndUtc.Value <= DateTime.UtcNow));
+
+    private bool _hasMyFeedback;
+    private bool ShowFeedbackForm => _isInterviewer && IsCompleted && !_hasMyFeedback;
+
+    private FeedbackDto? MyFeedback =>
+        _currentUserId.HasValue
+            ? _feedback.FirstOrDefault(f => f.ReviewerUserId == _currentUserId.Value)
+            : null;
+
+    private List<FeedbackDto> MyCandidateFeedback =>
+        _myCandidateParticipantId.HasValue
+            ? _feedback.Where(f => f.CandidateParticipantId == _myCandidateParticipantId.Value).ToList()
+            : new List<FeedbackDto>();
+
+    // feedback form
+    private Guid? _selectedCandidateParticipantId;
+    private decimal? _scoreOverall;
+    private decimal? _scoreTech;
+    private decimal? _scoreComm;
+    private Recommendation _recommendation = Recommendation.Hold;
+    private string? _strengths;
+    private string? _concerns;
+    private string? _feedbackError;
+    private bool _savingFeedback;
+
+    // questions
+    private HashSet<Guid> _selectedQuestionIds = new();
+    private string _questionSearch = string.Empty;
+    private bool _savingQuestions;
+    private string? _questionsError;
+
+    private IEnumerable<QuestionDto> FilteredQuestions =>
+        _allQuestions
+            .Where(q =>
+                string.IsNullOrWhiteSpace(_questionSearch) ||
+                q.Title.Contains(_questionSearch, StringComparison.OrdinalIgnoreCase) ||
+                q.Body.Contains(_questionSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(q => q.Title);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateTask;
+            var user = authState.User;
+
+            if (user.Identity is null || !user.Identity.IsAuthenticated)
+            {
+                _error = "You must be signed in.";
+                return;
+            }
+
+            _isAdmin = user.IsInRole("Admin");
+
+            var idClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+            if (idClaim is null || !Guid.TryParse(idClaim.Value, out var userId))
+            {
+                _error = "User id claim is missing.";
+                return;
+            }
+
+            _currentUserId = userId;
+            _currentUserEmail = user.FindFirst(ClaimTypes.Email)?.Value;
+            _currentUserName = user.Identity.Name ?? _currentUserEmail ?? "User";
+
+            _summary = await SessionReportService.GetSummaryAsync(SessionId);
+            if (_summary is null)
+            {
+                _error = "Session summary not found.";
+                return;
+            }
+
+            var participants = await ParticipantService.GetBySessionAsync(SessionId, role: null);
+            _participants = participants.ToList();
+
+            _candidates = _participants
+                .Where(p => p.Role == ParticipantRole.Candidate)
+                .OrderBy(p => p.DisplayName ?? p.Email)
+                .ToList();
+
+            if (_candidates.Count == 1)
+                _selectedCandidateParticipantId = _candidates[0].Id;
+
+            _isInterviewer = _participants.Any(p =>
+                p.UserId.HasValue &&
+                p.UserId.Value == _currentUserId &&
+                p.Role == ParticipantRole.Interviewer);
+
+            // candidate detection (by UserId, or by email for guest)
+            var myCandidate = _participants.FirstOrDefault(p =>
+                p.Role == ParticipantRole.Candidate &&
+                (
+                    (p.UserId.HasValue && p.UserId.Value == _currentUserId) ||
+                    (!string.IsNullOrWhiteSpace(_currentUserEmail) &&
+                     !string.IsNullOrWhiteSpace(p.Email) &&
+                     string.Equals(p.Email, _currentUserEmail, StringComparison.OrdinalIgnoreCase))
+                ));
+
+            _isCandidate = myCandidate is not null;
+            _myCandidateParticipantId = myCandidate?.Id;
+
+            // access rule:
+            // - admins can view
+            // - interviewers can view
+            // - candidates (participant) can view
+            _canViewSummary = _isAdmin || _isInterviewer || _isCandidate;
+
+            var fb = await FeedbackService.GetBySessionAsync(SessionId);
+            _feedback = fb.ToList();
+            RecalculateHasMyFeedback();
+
+            if (_summary.OrgId != Guid.Empty)
+            {
+                var tags = await TagService.GetByOrgAsync(_summary.OrgId);
+                _tags = tags.ToList();
+
+                var allQ = await QuestionService.GetByOrgAsync(_summary.OrgId, level: null);
+                _allQuestions = allQ.ToList();
+            }
+
+            var assigned = await QuestionService.GetForSessionAsync(SessionId);
+            _assignedQuestions = assigned.ToList();
+            _selectedQuestionIds = new HashSet<Guid>(_assignedQuestions.Select(q => q.Id));
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load session summary: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveFeedbackAsync()
+    {
+        _feedbackError = null;
+
+        if (!_isInterviewer)
+        {
+            _feedbackError = "Only interviewers can leave feedback for this session.";
+            return;
+        }
+
+        if (!IsCompleted)
+        {
+            _feedbackError = "Feedback can be submitted only for completed sessions.";
+            return;
+        }
+
+        if (_hasMyFeedback)
+        {
+            _feedbackError = "You have already submitted feedback for this session.";
+            return;
+        }
+
+        if (!_selectedCandidateParticipantId.HasValue)
+        {
+            _feedbackError = "Please select a candidate.";
+            return;
+        }
+
+        if (_currentUserId is null || _currentUserId == Guid.Empty)
+        {
+            _feedbackError = "Current user id is not resolved.";
+            return;
+        }
+
+        _savingFeedback = true;
+
+        try
+        {
+            var req = new CreateFeedbackRequest
+                {
+                    SessionId = SessionId,
+                    ReviewerUserId = _currentUserId.Value,
+                    CandidateParticipantId = _selectedCandidateParticipantId,
+                    ScoreOverall = _scoreOverall,
+                    ScoreTech = _scoreTech,
+                    ScoreComm = _scoreComm,
+                    Recommendation = _recommendation,
+                    Strengths = _strengths,
+                    Concerns = _concerns
+                };
+
+            var created = await FeedbackService.AddAsync(req);
+
+            _feedback.Insert(0, created);
+            RecalculateHasMyFeedback();
+
+            _scoreOverall = null;
+            _scoreTech = null;
+            _scoreComm = null;
+            _recommendation = Recommendation.Hold;
+            _strengths = string.Empty;
+            _concerns = string.Empty;
+
+            if (_summary is not null)
+                _summary = await SessionReportService.GetSummaryAsync(SessionId);
+        }
+        catch (Exception ex)
+        {
+            _feedbackError = $"Failed to save feedback: {ex.Message}";
+        }
+        finally
+        {
+            _savingFeedback = false;
+        }
+    }
+
+    private void ToggleQuestionSelection(Guid questionId, object? value)
+    {
+        var isChecked = value is bool b && b;
+
+        if (isChecked)
+            _selectedQuestionIds.Add(questionId);
+        else
+            _selectedQuestionIds.Remove(questionId);
+    }
+
+    private async Task SaveQuestionsAsync()
+    {
+        _questionsError = null;
+
+        if (!_isInterviewer)
+        {
+            _questionsError = "Only interviewers can attach questions.";
+            return;
+        }
+
+        if (!IsCompleted)
+        {
+            _questionsError = "Questions can be attached only for completed sessions.";
+            return;
+        }
+
+        _savingQuestions = true;
+
+        try
+        {
+            var ids = _selectedQuestionIds.ToList();
+            await QuestionService.AssignToSessionAsync(SessionId, ids);
+
+            var assigned = await QuestionService.GetForSessionAsync(SessionId);
+            _assignedQuestions = assigned.ToList();
+
+            if (_summary is not null)
+                _summary = await SessionReportService.GetSummaryAsync(SessionId);
+        }
+        catch (Exception ex)
+        {
+            _questionsError = $"Failed to save questions: {ex.Message}";
+        }
+        finally
+        {
+            _savingQuestions = false;
+        }
+    }
+
+    private string GetParticipantDisplayName(Guid? participantId)
+    {
+        if (!participantId.HasValue)
+            return "-";
+
+        var p = _participants.FirstOrDefault(x => x.Id == participantId.Value);
+        if (p is null)
+            return "-";
+
+        if (!string.IsNullOrWhiteSpace(p.DisplayName))
+            return p.DisplayName;
+
+        return string.IsNullOrWhiteSpace(p.Email) ? "Candidate" : p.Email;
+    }
+
+    private static string GetParticipantLabel(ParticipantDto p)
+    {
+        var name = !string.IsNullOrWhiteSpace(p.DisplayName) ? p.DisplayName : null;
+        var email = !string.IsNullOrWhiteSpace(p.Email) ? p.Email : null;
+
+        if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(email))
+            return $"{name} ({email})";
+
+        return name ?? email ?? "Candidate";
+    }
+
+    private void BackToSessions()
+    {
+        Nav.NavigateTo("/sessions");
+    }
+
+    private void RecalculateHasMyFeedback()
+    {
+        if (!_currentUserId.HasValue)
+        {
+            _hasMyFeedback = false;
+            return;
+        }
+
+        _hasMyFeedback = _feedback.Any(f => f.ReviewerUserId == _currentUserId.Value);
+    }
+}

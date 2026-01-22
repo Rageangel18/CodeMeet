@@ -1,0 +1,357 @@
+﻿@page "/dashboard"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using CodeMeet.BLL.DTOs.Sessions
+@using CodeMeet.DAL.Enums
+@using CodeMeet.BLL.Services.Interfaces
+
+@inject ISessionService SessionService
+@inject NavigationManager Nav
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Dashboard</h1>
+            <p class="cm-page-subtitle">
+                Personalized dashboard for your role. All times are shown in UTC.
+            </p>
+        </div>
+
+        <div class="cm-page-actions">
+            <button class="cm-btn-ghost cm-btn-small"
+                    @onclick="ReloadAsync"
+                    disabled="@_loading">
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="cm-alert cm-alert-error">@_error</div>
+    }
+    else if (_loading)
+    {
+        <p>Loading dashboard…</p>
+    }
+    else
+    {
+        <div class="cm-grid-3">
+            <div class="cm-card">
+                <div class="cm-card-title">Today interviews</div>
+                <div class="cm-kpi">@_todayCount</div>
+                <div class="cm-card-text">
+                    Sessions scheduled for today (UTC) where you participate.
+                </div>
+            </div>
+
+            <div class="cm-card">
+                <div class="cm-card-title">Next interview</div>
+                <div class="cm-kpi">@_nextLabel</div>
+                <div class="cm-card-text">
+                    @(_nextTitle ?? "No upcoming sessions for you.")
+                </div>
+                @if (_nextId != Guid.Empty)
+                {
+                    <div style="margin-top: 10px;">
+                        <button class="cm-btn-primary cm-btn-xxs"
+                                @onclick="@(() => OpenSession(_nextId))">
+                            Open
+                        </button>
+                    </div>
+                }
+            </div>
+
+            <div class="cm-card">
+                <div class="cm-card-title">Live now</div>
+                <div class="cm-kpi">@_liveCount</div>
+                <div class="cm-card-text">
+                    Sessions currently running with your participation.
+                </div>
+            </div>
+        </div>
+
+        <div class="cm-card" style="margin-top: 16px;">
+            <div class="cm-card-title">For interviewers & hiring managers</div>
+            <div class="cm-card-text" style="margin-top:8px;">
+                Focus on your nearest interviews:
+                – Use “Live sessions” to immediately join ongoing calls.
+                – “Upcoming (next 7 days)” is your personal preparation list.
+                – After a session is completed, go to “Recently completed” to submit or review feedback.
+            </div>
+        </div>
+
+        <div class="cm-grid-2" style="margin-top: 16px;">
+            <div class="cm-card">
+                <div class="cm-card-title">Live sessions</div>
+
+                @if (_liveSessions.Count == 0)
+                {
+                    <div class="cm-alert" style="margin-top: 10px;">
+                        No live sessions for you right now.
+                    </div>
+                }
+                else
+                {
+                    <div class="cm-list" style="margin-top: 10px;">
+                        @foreach (var s in _liveSessions)
+                        {
+                            <div class="cm-list-row">
+                                <div class="cm-list-main">
+                                    <div class="cm-list-title">@s.Title</div>
+                                    <div class="cm-list-subtitle">
+                                        Start: @(s.ScheduledStartUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-") (UTC)
+                                    </div>
+                                </div>
+
+                                <div class="cm-list-actions">
+                                    <button class="cm-btn-ghost cm-btn-xxs"
+                                            @onclick="@(() => OpenSession(s.SessionId))">
+                                        Details
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="cm-card">
+                <div class="cm-card-title">Upcoming (next 7 days)</div>
+
+                @if (_upcoming.Count == 0)
+                {
+                    <div class="cm-alert" style="margin-top: 10px;">
+                        No upcoming sessions for you in the next 7 days.
+                    </div>
+                }
+                else
+                {
+                    <div class="cm-list" style="margin-top: 10px;">
+                        @foreach (var s in _upcoming)
+                        {
+                            <div class="cm-list-row">
+                                <div class="cm-list-main">
+                                    <div class="cm-list-title">@s.Title</div>
+                                    <div class="cm-list-subtitle">
+                                        @(s.ScheduledStartUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")
+                                        -
+                                        @(s.ScheduledEndUtc?.ToString("HH:mm") ?? "-")
+                                        (UTC)
+                                    </div>
+                                </div>
+
+                                <div class="cm-list-actions">
+                                    <button class="cm-btn-ghost cm-btn-xxs"
+                                            @onclick="@(() => OpenSession(s.SessionId))">
+                                        Details
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="cm-card" style="margin-top: 16px;">
+            <div class="cm-card-title">Recently completed</div>
+
+            @if (_recentCompleted.Count == 0)
+            {
+                <div class="cm-alert" style="margin-top: 10px;">
+                    No completed sessions for you yet.
+                </div>
+            }
+            else
+            {
+                <div class="cm-list" style="margin-top: 10px;">
+                    @foreach (var s in _recentCompleted)
+                    {
+                        <div class="cm-list-row">
+                            <div class="cm-list-main">
+                                <div class="cm-list-title">@s.Title</div>
+                                <div class="cm-list-subtitle">
+                                    End: @(s.ScheduledEndUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-") (UTC)
+                                </div>
+                            </div>
+
+                            <div class="cm-list-actions">
+                                <button class="cm-btn-ghost cm-btn-xxs"
+                                        @onclick="@(() => OpenSession(s.SessionId))">
+                                    Details
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool _loading;
+    private string? _error;
+
+    private Guid _orgId;
+    private Guid _userId;
+
+    private List<SessionSummaryDto> _all = new();
+
+    private int _todayCount;
+    private int _liveCount;
+
+    private Guid _nextId = Guid.Empty;
+    private string? _nextTitle;
+    private string _nextLabel = "-";
+
+    private List<SessionSummaryDto> _liveSessions = new();
+    private List<SessionSummaryDto> _upcoming = new();
+    private List<SessionSummaryDto> _recentCompleted = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        // сброс, чтобы не было "перетекания" данных между аккаунтами
+        _all = new List<SessionSummaryDto>();
+        _todayCount = 0;
+        _liveCount = 0;
+        _nextId = Guid.Empty;
+        _nextTitle = null;
+        _nextLabel = "-";
+        _liveSessions = new List<SessionSummaryDto>();
+        _upcoming = new List<SessionSummaryDto>();
+        _recentCompleted = new List<SessionSummaryDto>();
+
+        try
+        {
+            var authState = await AuthStateTask;
+            var user = authState.User;
+
+            if (user.Identity is null || !user.Identity.IsAuthenticated)
+            {
+                _error = "You must be signed in.";
+                return;
+            }
+
+            var userIdStr =
+                user.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+                user.FindFirst("sub")?.Value;
+
+            if (!Guid.TryParse(userIdStr, out var userId))
+            {
+                _error = "User identifier is missing in auth claims.";
+                return;
+            }
+
+            var orgClaim = user.FindFirst("org_id");
+            if (orgClaim is null || !Guid.TryParse(orgClaim.Value, out var orgId))
+            {
+                _error = "Your organization is not set in auth claims (org_id).";
+                return;
+            }
+
+            _userId = userId;
+            _orgId = orgId;
+
+            var scheduled = await SessionService.GetByUserParticipationAsync(_userId, SessionStatus.Scheduled, default);
+            var live = await SessionService.GetByUserParticipationAsync(_userId, SessionStatus.Live, default);
+            var completed = await SessionService.GetByUserParticipationAsync(_userId, SessionStatus.Completed, default);
+
+            _all = scheduled
+                .Concat(live)
+                .Concat(completed)
+                .GroupBy(s => s.SessionId)
+                .Select(g => g.First())
+                .ToList();
+
+            ComputeStats();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load dashboard: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ComputeStats()
+    {
+        var now = DateTime.UtcNow;
+        var todayStart = now.Date;
+        var tomorrowStart = todayStart.AddDays(1);
+        var weekEnd = todayStart.AddDays(7);
+
+        _liveSessions = _all
+            .Where(s => s.Status == SessionStatus.Live)
+            .OrderByDescending(s => s.ScheduledStartUtc ?? DateTime.MinValue)
+            .Take(10)
+            .ToList();
+
+        _liveCount = _liveSessions.Count;
+
+        _todayCount = _all.Count(s =>
+        {
+            var start = s.ScheduledStartUtc;
+            if (start is null) return false;
+
+            return start.Value >= todayStart && start.Value < tomorrowStart;
+        });
+
+        var next = _all
+            .Where(s => s.Status == SessionStatus.Scheduled &&
+                        s.ScheduledStartUtc != null &&
+                        s.ScheduledStartUtc >= now)
+            .OrderBy(s => s.ScheduledStartUtc)
+            .FirstOrDefault();
+
+        if (next is null)
+        {
+            _nextId = Guid.Empty;
+            _nextTitle = null;
+            _nextLabel = "-";
+        }
+        else
+        {
+            _nextId = next.SessionId;
+            _nextTitle = next.Title;
+            _nextLabel = next.ScheduledStartUtc?.ToString("MM-dd HH:mm") + " UTC";
+        }
+
+        _upcoming = _all
+            .Where(s => s.Status == SessionStatus.Scheduled &&
+                        s.ScheduledStartUtc != null &&
+                        s.ScheduledStartUtc >= now &&
+                        s.ScheduledStartUtc < weekEnd)
+            .OrderBy(s => s.ScheduledStartUtc)
+            .Take(10)
+            .ToList();
+
+        _recentCompleted = _all
+            .Where(s => s.Status == SessionStatus.Completed)
+            .OrderByDescending(s => s.ScheduledEndUtc ?? s.ScheduledStartUtc ?? DateTime.MinValue)
+            .Take(10)
+            .ToList();
+    }
+
+    private void OpenSession(Guid id)
+    {
+        Nav.NavigateTo($"/sessions/{id}");
+    }
+}

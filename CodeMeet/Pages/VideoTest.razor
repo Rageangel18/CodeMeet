@@ -1,0 +1,145 @@
+﻿@page "/video/test"
+
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">SignalR video playground</h1>
+            <p class="cm-page-subtitle">
+                Simple test page to stream camera frames through the existing SessionHub.
+            </p>
+        </div>
+    </div>
+
+    <div class="cm-form-field" style="max-width: 360px;">
+        <label class="cm-label">Camera</label>
+
+        @if (!_devicesLoaded)
+        {
+            <div class="cm-field-hint">Detecting cameras…</div>
+        }
+        else if (_devices.Count == 0)
+        {
+            <div class="cm-alert cm-alert-error">
+                No cameras detected. Check your device permissions.
+            </div>
+        }
+        else
+        {
+            <select class="cm-input" @bind="_selectedDeviceId">
+                @foreach (var d in _devices)
+                {
+                    <option value="@d.DeviceId">@d.Label</option>
+                }
+            </select>
+        }
+
+        @if (!string.IsNullOrEmpty(_deviceError))
+        {
+            <div class="cm-alert cm-alert-error" style="margin-top: 4px;">
+                @_deviceError
+            </div>
+        }
+    </div>
+
+    <div class="cm-admin-two-column" style="margin-top: 16px;">
+        <div class="cm-admin-card">
+            <h2 class="cm-section-title">Local video</h2>
+            <video id="localVideo"
+                   autoplay
+                   muted
+                   playsinline
+                   style="width:100%; border-radius:16px; background:#000;"></video>
+        </div>
+
+        <div class="cm-admin-card">
+            <h2 class="cm-section-title">Remote video</h2>
+            <img id="remoteVideo"
+                 style="width:100%; border-radius:16px; background:#000; object-fit:cover;" />
+        </div>
+    </div>
+
+    <div class="cm-form-actions" style="margin-top:24px;">
+        <button class="cm-btn-primary"
+                @onclick="StartAsync"
+                disabled="@(_running || !_devicesLoaded || _devices.Count == 0)">
+            Start (session: @_sessionId)
+        </button>
+
+        <button class="cm-btn-ghost"
+                @onclick="StopAsync"
+                disabled="@(!_running)">
+            Stop
+        </button>
+    </div>
+
+    <p class="cm-field-hint" style="margin-top:8px;">
+        Open this page in two browser windows with the same session id to see the stream.
+    </p>
+</div>
+
+@code {
+    private bool _running;
+
+    private string _sessionId = "test-video-session";
+
+    private bool _devicesLoaded;
+    private string? _deviceError;
+
+    private List<VideoDevice> _devices = new();
+    private string? _selectedDeviceId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        try
+        {
+            var devices = await JS.InvokeAsync<VideoDevice[]>("videoTest.getVideoDevices");
+            _devices = devices?.ToList() ?? new List<VideoDevice>();
+
+            if (_devices.Count > 0)
+            {
+                _selectedDeviceId = _devices[0].DeviceId;
+            }
+
+            _devicesLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            _deviceError = $"Failed to load cameras: {ex.Message}";
+            _devicesLoaded = true;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task StartAsync()
+    {
+        if (_running)
+            return;
+
+        _running = true;
+
+        await JS.InvokeVoidAsync("videoTest.start", _sessionId, _selectedDeviceId);
+    }
+
+    private async Task StopAsync()
+    {
+        if (!_running)
+            return;
+
+        _running = false;
+
+        await JS.InvokeVoidAsync("videoTest.stop");
+    }
+
+    private sealed class VideoDevice
+    {
+        public string DeviceId { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+    }
+}

@@ -1,0 +1,253 @@
+﻿@inherits LayoutComponentBase
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Authorization
+@using CodeMeet.Services
+@inject AuthModalState AuthModals
+@inject Microsoft.JSInterop.IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>CodeMeet</PageTitle>
+
+<header class="cm-header">
+    <div class="cm-header-left">
+        <button type="button"
+                class="cm-burger"
+                aria-label="Open menu"
+                @onclick="ToggleMobileNav">
+            ☰
+        </button>
+
+        <div class="cm-logo">
+            <div class="cm-logo-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10 20L14 4M18 8l4 4-4 4M6 16l-4-4 4-4"
+                          fill="none" stroke="currentColor" stroke-width="2"
+                          stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+            </div>
+            <div class="cm-logo-text">
+                <span class="cm-logo-title">CodeMeet</span>
+                <span class="cm-logo-subtitle">Tech interview platform</span>
+            </div>
+        </div>
+
+        <nav class="cm-nav-main">
+            @if (_isCandidateOnly)
+            {
+                <!-- Кандидат видит только список сессий -->
+                <NavLink href="/sessions"
+                         class="cm-nav-link"
+                         Match="NavLinkMatch.All">
+                    Sessions
+                </NavLink>
+            }
+            else
+            {
+                <NavLink href="/dashboard"
+                         class="cm-nav-link"
+                         Match="NavLinkMatch.All">
+                    Dashboard
+                </NavLink>
+
+                <NavLink href="/sessions"
+                         class="cm-nav-link"
+                         Match="NavLinkMatch.Prefix">
+                    Sessions
+                </NavLink>
+
+                <NavLink href="/questions"
+                         class="cm-nav-link"
+                         Match="NavLinkMatch.Prefix">
+                    Question Bank
+                </NavLink>
+            }
+        </nav>
+    </div>
+
+    <div class="cm-header-right">
+        <AuthorizeView>
+            <Authorized>
+                <div class="cm-user-pill">
+                    <div class="cm-user-avatar">U</div>
+                    <div class="cm-user-info">
+                        <div class="cm-user-name">@context.User.Identity?.Name</div>
+                        <div class="cm-user-role">Signed in</div>
+                    </div>
+                </div>
+
+                <button type="button"
+                        class="cm-header-btn"
+                        @onclick="LogoutAsync">
+                    Logout
+                </button>
+            </Authorized>
+            <NotAuthorized>
+                <button type="button"
+                        class="cm-header-btn"
+                        @onclick="OpenLogin">
+                    Login
+                </button>
+                <button type="button"
+                        class="cm-header-btn cm-header-btn-primary"
+                        @onclick="OpenRegister">
+                    Register
+                </button>
+            </NotAuthorized>
+        </AuthorizeView>
+    </div>
+</header>
+
+<AuthorizeView>
+    <Authorized>
+        @if (_isCandidateOnly)
+        {
+            <!-- Для кандидата: НЕТ сайдбара, только контент -->
+            <main class="cm-main">
+                <div class="cm-main-inner">
+                    @Body
+                </div>
+            </main>
+        }
+        else
+        {
+            <!-- Для орг-пользователей: shell + sidebar -->
+            <div class="cm-shell @(_mobileNavOpen ? "cm-nav-open" : "")">
+                <div class="cm-nav-backdrop" @onclick="CloseMobileNav"></div>
+
+                <aside class="cm-sidebar">
+                    <div class="cm-sidebar-section">
+                        <div class="cm-sidebar-title">Navigation</div>
+
+                        <NavLink href="/dashboard"
+                                 class="cm-sidebar-link"
+                                 Match="NavLinkMatch.All"
+                                 @onclick="CloseMobileNav">
+                            <span class="cm-sidebar-dot cm-sidebar-dot-green"></span>
+                            Overview
+                        </NavLink>
+
+                        <NavLink href="/sessions"
+                                 class="cm-sidebar-link"
+                                 Match="NavLinkMatch.Prefix"
+                                 @onclick="CloseMobileNav">
+                            <span class="cm-sidebar-dot cm-sidebar-dot-blue"></span>
+                            Sessions
+                        </NavLink>
+
+                        <NavLink href="/questions"
+                                 class="cm-sidebar-link"
+                                 Match="NavLinkMatch.Prefix"
+                                 @onclick="CloseMobileNav">
+                            <span class="cm-sidebar-dot cm-sidebar-dot-orange"></span>
+                            Question bank
+                        </NavLink>
+
+                        @if (_isOrgAdmin)
+                        {
+                            <NavLink href="/admin"
+                                     class="cm-sidebar-link"
+                                     Match="NavLinkMatch.Prefix"
+                                     @onclick="CloseMobileNav">
+                                <span class="cm-sidebar-dot cm-sidebar-dot-purple"></span>
+                                Admin
+                            </NavLink>
+                        }
+                    </div>
+
+                    <div class="cm-sidebar-section">
+                        <div class="cm-sidebar-title">Shortcuts</div>
+
+                        <NavLink href="/sessions/create"
+                                 class="cm-sidebar-link cm-sidebar-link-small"
+                                 @onclick="CloseMobileNav">
+                            Schedule session
+                        </NavLink>
+
+                        <NavLink href="/questions/new"
+                                 class="cm-sidebar-link cm-sidebar-link-small"
+                                 @onclick="CloseMobileNav">
+                            New question
+                        </NavLink>
+                    </div>
+                </aside>
+
+                <main class="cm-main">
+                    <div class="cm-main-inner">
+                        @Body
+                    </div>
+                </main>
+            </div>
+        }
+    </Authorized>
+
+    <NotAuthorized>
+        <!-- Анонимные пользователи (лендинг) -->
+        <main class="cm-main">
+            <div class="cm-main-inner">
+                @Body
+            </div>
+        </main>
+    </NotAuthorized>
+</AuthorizeView>
+
+<AuthModals />
+
+@code {
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool _mobileNavOpen;
+    private bool _isOrgAdmin;
+    private bool _isCandidateOnly;
+    private bool _isOrgMember;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var state = await AuthStateTask;
+        var user = state.User;
+
+        var isAuthenticated = user?.Identity?.IsAuthenticated == true;
+
+        if (!isAuthenticated)
+        {
+            _isOrgAdmin = false;
+            _isCandidateOnly = false;
+            _isOrgMember = false;
+            return;
+        }
+
+        var orgClaim = user.FindFirst("org_id");
+        _isOrgMember = orgClaim != null && Guid.TryParse(orgClaim.Value, out _);
+
+        _isOrgAdmin =
+            _isOrgMember &&
+            (user.IsInRole("OrgAdmin") ||
+             user.Claims.Any(c =>
+                 (c.Type == "org_role" || c.Type == ClaimTypes.Role) &&
+                 c.Value == "OrgAdmin"));
+
+        // Кандидат/гость – авторизован, но НЕ привязан к организации
+        _isCandidateOnly = !_isOrgMember;
+    }
+
+    private void ToggleMobileNav() => _mobileNavOpen = !_mobileNavOpen;
+    private void CloseMobileNav() => _mobileNavOpen = false;
+
+    private void OpenLogin() => AuthModals.OpenLogin();
+    private void OpenRegister() => AuthModals.OpenRegister();
+
+    private async Task LogoutAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("codeMeetAuth.logout");
+        }
+        catch
+        {
+            Console.WriteLine("logged out");
+        }
+
+        Nav.NavigateTo("/", forceLoad: true);
+    }
+}

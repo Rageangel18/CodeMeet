@@ -1,0 +1,74 @@
+﻿@page "/sessions"
+@attribute [Authorize]
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject NavigationManager Nav
+
+<div class="cm-page">
+    <h1 class="cm-page-title">Sessions</h1>
+
+    @if (_loading)
+    {
+        <p class="cm-field-hint">Checking your role and redirecting…</p>
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="cm-alert cm-alert-error">
+            @_error
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateTask;
+            var user = authState.User;
+
+            if (user?.Identity is null || !user.Identity.IsAuthenticated)
+            {
+                _error = "You must be signed in to view sessions.";
+                _loading = false;
+                return;
+            }
+
+            var roles = user.Claims
+                .Where(c => c.Type == ClaimTypes.Role || c.Type == "role")
+                .Select(c => c.Value)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var isAdminLike =
+                roles.Contains("OrgAdmin") ||
+                roles.Contains("Recruiter") ||
+                roles.Contains("HiringManager");
+
+            if (isAdminLike)
+            {
+                Nav.NavigateTo("/sessions/admin", forceLoad: false);
+            }
+            else
+            {
+                Nav.NavigateTo("/sessions/my", forceLoad: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to detect your role: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+}

@@ -1,0 +1,958 @@
+﻿@page "/sessions/{SessionId:guid}/live"
+@attribute [Authorize]
+
+@using System.Net.Http.Json
+@using System.Security.Claims
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.AspNetCore.WebUtilities
+@using CodeMeet.BLL.DTOs.Sessions
+@using CodeMeet.BLL.DTOs.Participants
+@using CodeMeet.BLL.DTOs.Chat
+@using CodeMeet.BLL.DTOs.Exec
+@using CodeMeet.BLL.Services.Interfaces
+@using CodeMeet.DAL.Enums
+@using CodeMeet.Web.Security
+
+@inject ISessionService SessionService
+@inject IParticipantService ParticipantService
+@inject NavigationManager Nav
+@inject IChatService ChatService
+@inject IJSRuntime JS
+@inject IUserRoleResolver RoleResolver
+
+@implements IAsyncDisposable
+
+<div class="cm-page cm-live-page" tabindex="0" @onkeydown="HandleGlobalKeyDown">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">@(_session?.Title ?? "Live session")</h1>
+            <p class="cm-page-subtitle">
+                Press M to mute/unmute, Esc to leave call.
+            </p>
+        </div>
+
+        <div class="cm-form-actions">
+            <button class="cm-btn-ghost cm-btn-small" @onclick="BackToSessions">
+                ← Back
+            </button>
+
+            <button class="cm-btn-ghost cm-btn-small" @onclick="ToggleMute" disabled="@(!_inCall)">
+                @(_muted ? "Unmute (M)" : "Mute (M)")
+            </button>
+
+            <button class="cm-btn-primary cm-btn-small cm-btn-danger"
+                    style="margin-left: 8px;"
+                    @onclick="LeaveCallAsync"
+                    disabled="@(!_inCall)">
+                Leave (Esc)
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="cm-alert cm-alert-error">@_error</div>
+    }
+    else if (_loading)
+    {
+        <p>Loading session…</p>
+    }
+    else if (!_allowed)
+    {
+        <div class="cm-alert cm-alert-error">
+            You are not a participant of this session.
+        </div>
+    }
+    else
+    {
+        @if (!_isLive)
+        {
+            <div class="cm-alert cm-alert">
+                This session is not Live yet. Current status: @(_session?.Status.ToString() ?? "-")
+            </div>
+        }
+
+        <div class="cm-live-layout">
+            <!-- Video -->
+            <div class="cm-live-card cm-live-card--video">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <h2 class="cm-section-title">Video</h2>
+
+                    <button type="button"
+                            class="cm-icon-btn"
+                            title="Device settings"
+                            @onclick="OpenSettings"
+                            disabled="@(!_devicesLoaded)">
+                        ⚙
+                    </button>
+                </div>
+
+                <div class="cm-live-video-container" style="padding: 6px;">
+                    <img id="remoteVideo" class="cm-live-video-remote" />
+
+                    <video id="localVideo" autoplay muted playsinline class="cm-live-video-local">
+                    </video>
+
+                    <div style="position:absolute; left:12px; bottom:12px; padding:4px 8px; border-radius:999px; background:rgba(0,0,0,0.55); color:#fff; font-size:12px;">
+                        @if (_inCall)
+                        {
+                            <span>In call · @(_muted ? "Muted" : "Mic on")</span>
+                        }
+                        else
+                        {
+                            <span>@(_isLive ? "Ready" : "Not live")</span>
+                        }
+                    </div>
+                </div>
+
+                <audio id="remoteAudio" autoplay style="display:none"></audio>
+
+                <div style="margin-top:12px;">
+                    <h3 class="cm-section-title">Participants</h3>
+
+                    @if (_participants.Count == 0)
+                    {
+                        <div class="cm-field-hint">No participants found.</div>
+                    }
+                    else
+                    {
+                        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                            @foreach (var p in _participants)
+                            {
+                                <div style="padding:4px 10px; border-radius:999px; background:#1e1f28; border:1px solid #333; font-size:12px;">
+                                    <span style="font-weight:600;">@p.DisplayName</span>
+                                    <span class="cm-field-hint" style="margin-left:4px;">(@p.Role)</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div style="margin-top:16px;">
+                    @if (!_inCall)
+                    {
+                        <button class="cm-btn-primary"
+                                @onclick="JoinCallAsync"
+                                disabled="@(!_canJoinCall)">
+                            @(_canJoinCall ? "Join call" : "Join disabled")
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="cm-btn-ghost" @onclick="LeaveCallAsync">
+                            Leave call
+                        </button>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_deviceError))
+                    {
+                        <div class="cm-alert cm-alert-error" style="margin-top:10px;">
+                            @_deviceError
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Chat -->
+            <div class="cm-live-card cm-live-card--chat">
+                <h2 class="cm-section-title">Chat</h2>
+
+                @if (!string.IsNullOrEmpty(_chatError))
+                {
+                    <div class="cm-alert cm-alert-error">@_chatError</div>
+                }
+
+                <div class="cm-live-chat-messages" @ref="_chatMessagesRef">
+                    @if (_chatMessages.Count == 0)
+                    {
+                        <span class="cm-field-hint">No messages yet.</span>
+                    }
+                    else
+                    {
+                        @foreach (var m in _chatMessages)
+                        {
+                            var isMine = m.AuthorUserId.HasValue && m.AuthorUserId.Value == _currentUserId;
+                            var cssClass = isMine ? "cm-live-chat-message me" : "cm-live-chat-message other";
+
+                            <div class="@cssClass">
+                                <div class="cm-live-chat-meta">
+                                    <span>@(isMine ? "You" : m.AuthorDisplayName ?? "User")</span>
+                                    <span>@m.CreatedUtc.ToLocalTime().ToString("HH:mm")</span>
+                                </div>
+                                <div class="cm-live-chat-text">@m.Text</div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div class="cm-live-chat-input">
+                    <input class="cm-input"
+                           placeholder="Type a message…"
+                           @bind="_chatInput"
+                           @bind:event="oninput"
+                           @onkeydown="HandleChatKeyDown" />
+
+                    <button class="cm-btn-primary cm-btn-small"
+                            @onclick="SendChatAsync"
+                            disabled="@(_chatSending || string.IsNullOrWhiteSpace(_chatInput))">
+                        @(_chatSending ? "Sending..." : "Send")
+                    </button>
+                </div>
+            </div>
+
+            <!-- Code (Monaco) -->
+            <div class="cm-live-card" style="display:flex; flex-direction:column; min-width: 420px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                    <h2 class="cm-section-title" style="margin:0;">Code</h2>
+
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <select class="cm-input" style="height:34px; padding:0 10px;" @bind="_editorLanguageUi" disabled="@(!_editorReady)">
+                            <option value="CSharp">CSharp</option>
+                            <option value="JavaScript">JavaScript</option>
+                        </select>
+
+                        @if (_isInterviewerOrAdmin)
+                        {
+                            <button class="cm-btn-primary cm-btn-small"
+                                    @onclick="RunAsync"
+                                    disabled="@(!_editorReady || _hub is null || _hub.State != HubConnectionState.Connected || _runInFlight)">
+                                @(_runInFlight ? "Running..." : "Run")
+                            </button>
+                        }
+                        @if (_hub is null || _hub.State != HubConnectionState.Connected)
+                        {
+                            <div class="cm-field-hint">Realtime sync is offline - reconnecting…</div>
+                        }
+                    </div>
+                </div>
+
+                @if (!_isInterviewerOrAdmin)
+                {
+                    <div class="cm-field-hint" style="margin-top:6px;">
+                        Read-only run access. Only interviewer/admin can run code.
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(_editorError))
+                {
+                    <div class="cm-alert cm-alert-error" style="margin-top:10px;">@_editorError</div>
+                }
+
+                <div id="cm-editor"
+                     style="margin-top:12px; height:420px; border-radius:14px; overflow:hidden; border:1px solid #2b2d3a; background:#0f1116;">
+                </div>
+
+                <div style="margin-top:12px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <h3 class="cm-section-title" style="margin:0;">Output</h3>
+                        <div class="cm-field-hint">
+                            @if (_lastRun != null)
+                            {
+                                <span>@_lastRun.Status · exit: @(_lastRun.ExitCode?.ToString() ?? "-") · @(_lastRun.DurationMs?.ToString() ?? "-") ms</span>
+                            }
+                            else
+                            {
+                                <span>No runs yet.</span>
+                            }
+                        </div>
+                    </div>
+
+                    <div style="margin-top:8px; padding:10px 12px; border-radius:14px; border:1px solid #2b2d3a; background:#0f1116; min-height:140px; white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:12px; line-height:1.45;">
+                        @if (!string.IsNullOrEmpty(_runUiStatus))
+                        {
+                            <div style="margin-bottom:8px;">@_runUiStatus</div>
+                        }
+
+                        @if (_lastRun != null)
+                        {
+                            @if (!string.IsNullOrWhiteSpace(_lastRun.Stdout))
+                            {
+                                <div>@_lastRun.Stdout</div>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(_lastRun.Stderr))
+                            {
+                                <div style="margin-top:10px;">@_lastRun.Stderr</div>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (_settingsOpen)
+        {
+            <div class="cm-modal-backdrop">
+                <div class="cm-modal-dialog">
+                    <h3 class="cm-section-title" style="margin-bottom:12px;">Device settings</h3>
+
+                    @if (!_devicesLoaded)
+                    {
+                        <div class="cm-field-hint">Devices are still loading…</div>
+                    }
+                    else if (_devices.Count == 0)
+                    {
+                        <div class="cm-alert cm-alert-error">No cameras detected. Check your device permissions.</div>
+                    }
+                    else
+                    {
+                        <div class="cm-form-field">
+                            <label class="cm-label">Camera</label>
+                            <select class="cm-input" @bind="_settingsDeviceId">
+                                @foreach (var d in _devices)
+                                {
+                                    <option value="@d.DeviceId">@d.Label</option>
+                                }
+                            </select>
+                        </div>
+                    }
+
+                    <div class="cm-form-actions" style="margin-top:16px; justify-content:flex-end;">
+                        <button class="cm-btn-ghost cm-btn-small" @onclick="CloseSettings">
+                            Cancel
+                        </button>
+                        <button class="cm-btn-primary cm-btn-small"
+                                style="margin-left:8px;"
+                                @onclick="ApplySettingsAsync"
+                                disabled="@(!_devicesLoaded || _devices.Count == 0)">
+                            Save
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public Guid SessionId { get; set; }
+
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    // Session
+    private SessionDto? _session;
+    private List<ParticipantDto> _participants = new();
+    private bool _loading = true;
+    private bool _allowed;
+    private string? _error;
+
+    // User
+    private Guid? _currentUserId;
+    private string? _currentUserName;
+    private bool _isInterviewerOrAdmin;
+
+    // Call state
+    private bool _inCall;
+    private bool _muted;
+
+    // Devices
+    private bool _devicesLoaded;
+    private string? _deviceError;
+    private List<VideoDevice> _devices = new();
+    private string? _selectedDeviceId;
+    private string? _cameraFromQuery;
+    private bool _autoJoinFromQuery;
+
+    // Settings modal
+    private bool _settingsOpen;
+    private string? _settingsDeviceId;
+
+    // Chat
+    private List<ChatMessageDto> _chatMessages = new();
+    private DateTime? _lastChatUtc;
+    private string _chatInput = string.Empty;
+    private bool _chatSending;
+    private string? _chatError;
+    private CancellationTokenSource? _chatLoopCts;
+    private Task? _chatLoopTask;
+    private ElementReference _chatMessagesRef;
+    private bool _chatNeedsScroll;
+    private readonly HashSet<Guid> _chatMessageIds = new();
+
+    // Live flags
+    private bool _isLive => _session?.Status == SessionStatus.Live;
+    private bool _canJoinCall => _allowed && _isLive && _devicesLoaded && _devices.Count > 0 && !string.IsNullOrEmpty(_selectedDeviceId);
+
+    // Editor + Hub
+    private HubConnection? _hub;
+    private IJSObjectReference? _editorJs;
+    private DotNetObjectReference<SessionLive>? _dotNetRef;
+    private bool _editorReady;
+    private bool _suppressLocalChange;
+    private string? _editorError;
+
+    private long _editorVersion;
+    private string _editorLanguageUi = "CSharp"; // UI value: CSharp / JavaScript
+    private string _editorLanguageMonaco = "csharp"; // monaco: csharp / javascript
+    private string _code = "// Start typing...\n";
+
+    // Run UI
+    private bool _runInFlight;
+    private ExecRequestDto? _lastRun;
+    private string? _runUiStatus;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateTask;
+            var user = authState.User;
+
+            if (user.Identity is null || !user.Identity.IsAuthenticated)
+            {
+                _error = "You must be signed in.";
+                return;
+            }
+
+            var idClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+            if (idClaim is null || !Guid.TryParse(idClaim.Value, out var userId))
+            {
+                _error = "User id claim is missing.";
+                return;
+            }
+
+            _currentUserId = userId;
+            _currentUserName = user.Identity.Name ?? user.FindFirst(ClaimTypes.Email)?.Value ?? "User";
+
+            _isInterviewerOrAdmin = RoleResolver.IsInterviewerOrAdmin(user);
+
+            var uri = Nav.ToAbsoluteUri(Nav.Uri);
+            var query = QueryHelpers.ParseQuery(uri.Query);
+
+            if (query.TryGetValue("camera", out var camParam))
+                _cameraFromQuery = camParam.ToString();
+
+            if (query.TryGetValue("autoJoin", out var autoParam) &&
+                (autoParam.ToString() == "1" ||
+                 string.Equals(autoParam.ToString(), "true", StringComparison.OrdinalIgnoreCase)))
+            {
+                _autoJoinFromQuery = true;
+            }
+
+            _session = await SessionService.GetByIdAsync(SessionId);
+            if (_session is null)
+            {
+                _error = "Session not found.";
+                return;
+            }
+
+            var parts = await ParticipantService.GetBySessionAsync(SessionId);
+            _participants = parts.ToList();
+
+            _allowed = _participants.Any(p => p.UserId == _currentUserId);
+            if (!_allowed)
+                return;
+
+            await LoadChatAsync(initial: true);
+            StartChatLoop();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load live session: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chatNeedsScroll)
+        {
+            _chatNeedsScroll = false;
+            try { await JS.InvokeVoidAsync("chatHelper.scrollToBottom", _chatMessagesRef); } catch { }
+        }
+
+        // 1) Devices init (как было)
+        if (_allowed && !_devicesLoaded)
+        {
+            try
+            {
+                var devices = await JS.InvokeAsync<VideoDevice[]>("videoTest.getVideoDevices");
+                _devices = devices?.ToList() ?? new List<VideoDevice>();
+
+                if (_devices.Count > 0)
+                {
+                    if (!string.IsNullOrEmpty(_cameraFromQuery) && _devices.Any(d => d.DeviceId == _cameraFromQuery))
+                        _selectedDeviceId = _cameraFromQuery;
+                    else
+                        _selectedDeviceId = _devices[0].DeviceId;
+                }
+
+                _devicesLoaded = true;
+
+                if (_autoJoinFromQuery && !_inCall && _canJoinCall)
+                {
+                    _autoJoinFromQuery = false;
+                    await JoinCallAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _deviceError = $"Failed to load cameras: {ex.Message}";
+                _devicesLoaded = true;
+            }
+
+            try { await JS.InvokeVoidAsync("eval", "document.querySelector('.cm-page')?.focus();"); } catch { }
+
+            StateHasChanged();
+        }
+
+        // 2) Editor + SignalR Hub init
+        if (firstRender && _allowed)
+        {
+            await InitHubAndEditorAsync();
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task InitHubAndEditorAsync()
+    {
+        try
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+
+            // 1) JS module - только абсолютный путь
+            var moduleUrl = Nav.ToAbsoluteUri("js/sessionLiveEditor.js").ToString();
+            _editorJs = await JS.InvokeAsync<IJSObjectReference>("import", moduleUrl);
+
+            // 2) Создаем Monaco сразу
+            _editorLanguageMonaco = ToMonacoLanguage(_editorLanguageUi);
+            await _editorJs.InvokeVoidAsync("create", "cm-editor", _code, _editorLanguageMonaco, _dotNetRef);
+            _editorReady = true;
+
+            // 3) Теперь подключаемся к SessionHub (если упадет - редактор все равно работает)
+            var hubUrl = Nav.ToAbsoluteUri("/hubs/session");
+            _hub = new HubConnectionBuilder()
+                .WithUrl(hubUrl)
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hub.On<string, string, long, string, DateTime>("EditorStateReceived", async (lang, code, version, updatedBy, updatedUtc) =>
+            {
+                await ApplyRemoteCodeAsync(lang, code, version);
+            });
+
+            _hub.On<string, string, long, string, DateTime>("CodeUpdated", async (lang, code, version, updatedBy, updatedUtc) =>
+            {
+                await ApplyRemoteCodeAsync(lang, code, version);
+            });
+
+            _hub.On<RunRequestedPayload>("RunRequested", payload =>
+            {
+                _runInFlight = true;
+                _runUiStatus = $"Run requested by {payload.requestedBy} at {payload.createdUtc.ToLocalTime():HH:mm:ss}";
+                return InvokeAsync(StateHasChanged);
+            });
+
+            _hub.On<ExecRequestDto>("RunCompleted", dto =>
+            {
+                _lastRun = dto;
+                _runInFlight = false;
+                _runUiStatus = $"Run completed at {(dto.CompletedUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "-")}";
+                return InvokeAsync(StateHasChanged);
+            });
+
+            _hub.On<JsonElement>("RunFailed", err =>
+            {
+                _runInFlight = false;
+                _runUiStatus = $"Run failed: {err}";
+                return InvokeAsync(StateHasChanged);
+            });
+
+            await _hub.StartAsync();
+            await _hub.InvokeAsync("JoinSession", SessionId.ToString());
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            _editorError = $"Editor init failed: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ApplyRemoteCodeAsync(string lang, string code, long version)
+    {
+        try
+        {
+            if (version <= _editorVersion)
+                return;
+
+            _suppressLocalChange = true;
+
+            _code = code ?? string.Empty;
+            _editorVersion = version;
+
+            // language from hub is "CSharp"/"JavaScript" style, we normalize for monaco
+            var monacoLang = ToMonacoLanguage(lang);
+            _editorLanguageUi = NormalizeUiLanguage(lang);
+            _editorLanguageMonaco = monacoLang;
+
+            if (_editorJs != null)
+            {
+                await _editorJs.InvokeVoidAsync("setLanguage", "cm-editor", _editorLanguageMonaco);
+                await _editorJs.InvokeVoidAsync("setValue", "cm-editor", _code);
+            }
+        }
+        finally
+        {
+            _suppressLocalChange = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnEditorChanged(string value)
+    {
+        if (_suppressLocalChange)
+            return;
+
+        _code = value ?? string.Empty;
+        _editorVersion++;
+
+        if (_hub is null || _hub.State != HubConnectionState.Connected)
+            return;
+
+        var uiLang = NormalizeUiLanguage(_editorLanguageUi);
+        var monacoLang = ToMonacoLanguage(uiLang);
+
+        if (_editorLanguageMonaco != monacoLang)
+        {
+            _editorLanguageMonaco = monacoLang;
+            if (_editorJs != null)
+                await _editorJs.InvokeVoidAsync("setLanguage", "cm-editor", _editorLanguageMonaco);
+        }
+
+        await _hub.SendAsync(
+            "UpdateCode",
+            SessionId.ToString(),
+            _currentUserName,
+            uiLang,
+            _code,
+            _editorVersion);
+    }
+
+    private async Task RunAsync()
+    {
+        if (!_isInterviewerOrAdmin || !_editorReady || _hub is null)
+            return;
+
+        try
+        {
+            _runInFlight = true;
+            _runUiStatus = "Sending run request…";
+
+            if (_editorJs != null)
+                _code = await _editorJs.InvokeAsync<string>("getValue", "cm-editor");
+
+            var uiLang = NormalizeUiLanguage(_editorLanguageUi);
+
+            await _hub.InvokeAsync(
+                "RequestRun",
+                SessionId.ToString(),
+                _currentUserName,
+                uiLang,
+                _code,
+                (Guid?)null);
+
+            // дальше статус обновится по RunRequested/RunCompleted из хаба
+        }
+        catch (Exception ex)
+        {
+            _runInFlight = false;
+            _runUiStatus = $"Run failed to send: {ex.Message}";
+        }
+
+        StateHasChanged();
+    }
+
+    private static string NormalizeUiLanguage(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "CSharp";
+
+        var v = value.Trim();
+
+        if (v.Equals("csharp", StringComparison.OrdinalIgnoreCase) || v.Equals("c#", StringComparison.OrdinalIgnoreCase))
+            return "CSharp";
+
+        if (v.Equals("javascript", StringComparison.OrdinalIgnoreCase) || v.Equals("js", StringComparison.OrdinalIgnoreCase))
+            return "JavaScript";
+
+        if (v.Equals("JavaScript", StringComparison.OrdinalIgnoreCase))
+            return "JavaScript";
+
+        if (v.Equals("CSharp", StringComparison.OrdinalIgnoreCase))
+            return "CSharp";
+
+        return "CSharp";
+    }
+
+    private static string ToMonacoLanguage(string uiLang)
+    {
+        var v = NormalizeUiLanguage(uiLang);
+        return v == "JavaScript" ? "javascript" : "csharp";
+    }
+
+    private async Task JoinCallAsync()
+    {
+        if (_inCall || !_canJoinCall)
+            return;
+
+        _inCall = true;
+
+        try
+        {
+            await JS.InvokeVoidAsync("videoTest.start", SessionId.ToString(), _selectedDeviceId);
+        }
+        catch (Exception ex)
+        {
+            _inCall = false;
+            _deviceError = $"Failed to start call: {ex.Message}";
+        }
+    }
+
+    private async Task LeaveCallAsync()
+    {
+        if (!_inCall)
+            return;
+
+        _inCall = false;
+
+        try { await JS.InvokeVoidAsync("videoTest.stop"); } catch { }
+    }
+
+    private async void ToggleMute()
+    {
+        if (!_inCall)
+            return;
+
+        _muted = !_muted;
+        try { await JS.InvokeVoidAsync("videoTest.setMuted", _muted); } catch { }
+    }
+
+    private async Task HandleGlobalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "m" or "M")
+        {
+            ToggleMute();
+            return;
+        }
+
+        if (e.Key == "Escape")
+        {
+            await LeaveCallAsync();
+        }
+    }
+
+    private async Task HandleChatKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendChatAsync();
+    }
+
+    private async Task LoadChatAsync(bool initial)
+    {
+        try
+        {
+            DateTime? fromUtc = initial ? null : _lastChatUtc;
+            var list = await ChatService.GetBySessionAsync(SessionId, fromUtc);
+
+            var newMessagesAdded = false;
+
+            if (initial)
+            {
+                _chatMessages = list.OrderBy(m => m.CreatedUtc).ToList();
+                _chatMessageIds.Clear();
+
+                foreach (var m in _chatMessages)
+                {
+                    if (_chatMessageIds.Add(m.Id))
+                        newMessagesAdded = true;
+                }
+            }
+            else
+            {
+                foreach (var m in list.OrderBy(m => m.CreatedUtc))
+                {
+                    if (_chatMessageIds.Add(m.Id))
+                    {
+                        _chatMessages.Add(m);
+                        newMessagesAdded = true;
+                    }
+                }
+            }
+
+            if (_chatMessages.Count > 0)
+                _lastChatUtc = _chatMessages.Max(m => m.CreatedUtc);
+
+            if (newMessagesAdded)
+                _chatNeedsScroll = true;
+        }
+        catch (Exception ex)
+        {
+            _chatError = $"Failed to load chat: {ex.Message}";
+        }
+    }
+
+    private void StartChatLoop()
+    {
+        if (_chatLoopCts != null)
+            return;
+
+        _chatLoopCts = new CancellationTokenSource();
+        _chatLoopTask = Task.Run(() => ChatPollingLoopAsync(_chatLoopCts.Token));
+    }
+
+    private async Task ChatPollingLoopAsync(CancellationToken token)
+    {
+        var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                await LoadChatAsync(initial: false);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task SendChatAsync()
+    {
+        var text = _chatInput?.Trim();
+        if (string.IsNullOrEmpty(text) || _session is null)
+            return;
+
+        _chatSending = true;
+        _chatError = null;
+
+        try
+        {
+            var req = new CreateChatMessageRequest
+                {
+                    SessionId = _session.Id,
+                    AuthorUserId = _currentUserId == Guid.Empty ? null : _currentUserId,
+                    Text = text
+                };
+
+            var msg = await ChatService.SendAsync(req);
+
+            if (_chatMessageIds.Add(msg.Id))
+            {
+                _chatMessages.Add(msg);
+                _chatNeedsScroll = true;
+            }
+
+            _chatInput = string.Empty;
+
+            if (!_lastChatUtc.HasValue || msg.CreatedUtc > _lastChatUtc.Value)
+                _lastChatUtc = msg.CreatedUtc;
+        }
+        catch (Exception ex)
+        {
+            _chatError = $"Failed to send message: {ex.Message}";
+        }
+        finally
+        {
+            _chatSending = false;
+            StateHasChanged();
+        }
+    }
+
+    private void BackToSessions() => Nav.NavigateTo("/sessions");
+
+    private void OpenSettings()
+    {
+        _settingsDeviceId = _selectedDeviceId;
+        _settingsOpen = true;
+    }
+
+    private void CloseSettings()
+    {
+        _settingsOpen = false;
+    }
+
+    private async Task ApplySettingsAsync()
+    {
+        if (!_settingsOpen)
+            return;
+
+        _settingsOpen = false;
+
+        if (string.IsNullOrEmpty(_settingsDeviceId) || _settingsDeviceId == _selectedDeviceId)
+            return;
+
+        _selectedDeviceId = _settingsDeviceId;
+
+        if (_inCall)
+        {
+            try { await JS.InvokeVoidAsync("videoTest.stop"); } catch { }
+            try { await JS.InvokeVoidAsync("videoTest.start", SessionId.ToString(), _selectedDeviceId); } catch { }
+        }
+    }
+
+    private sealed class VideoDevice
+    {
+        public string DeviceId { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+    }
+
+    private sealed class RunRequestedPayload
+    {
+        public Guid execRequestId { get; set; }
+        public string requestedBy { get; set; } = "Guest";
+        public DateTime createdUtc { get; set; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_chatLoopCts != null)
+        {
+            _chatLoopCts.Cancel();
+            try { if (_chatLoopTask != null) await _chatLoopTask; } catch { }
+            _chatLoopCts.Dispose();
+            _chatLoopCts = null;
+        }
+
+        if (_inCall)
+        {
+            try { await JS.InvokeVoidAsync("videoTest.stop"); } catch { }
+            _inCall = false;
+        }
+
+        try
+        {
+            if (_hub != null)
+            {
+                try { await _hub.InvokeAsync("LeaveSession", SessionId.ToString()); } catch { }
+                await _hub.DisposeAsync();
+                _hub = null;
+            }
+        }
+        catch { }
+
+        try
+        {
+            if (_editorJs != null)
+            {
+                try { await _editorJs.InvokeVoidAsync("dispose", "cm-editor"); } catch { }
+                await _editorJs.DisposeAsync();
+                _editorJs = null;
+            }
+        }
+        catch { }
+
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+    }
+}

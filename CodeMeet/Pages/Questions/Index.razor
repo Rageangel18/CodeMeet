@@ -1,0 +1,384 @@
+﻿@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@page "/questions"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using CodeMeet.BLL.DTOs.Questions
+@using CodeMeet.BLL.DTOs.Tags
+@using CodeMeet.BLL.Services.Interfaces
+@using CodeMeet.DAL.Enums
+
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IQuestionService QuestionService
+@inject ITagService TagService
+@inject NavigationManager Nav
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Question Bank</h1>
+            <p class="cm-page-subtitle">
+                Browse questions in your organization.
+            </p>
+        </div>
+
+        <div class="cm-page-actions">
+            @if (_canManageQuestions)
+            {
+                <button type="button" class="cm-btn-primary cm-btn-small" @onclick="CreateQuestion">
+                    Create question
+                </button>
+            }
+
+            <button type="button" class="cm-btn-ghost cm-btn-small"
+                    @onclick="ReloadAsync"
+                    disabled="@_loading">
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="cm-alert cm-alert-error">@_error</div>
+    }
+    else if (_loading)
+    {
+        <p>Loading questions…</p>
+    }
+    else if (!_hasOrg)
+    {
+        <div class="cm-alert">
+            You are signed in as a candidate/guest. Question bank management is available only for organization members.
+        </div>
+
+        <div class="cm-card" style="margin-top: 14px;">
+            <div class="cm-card-title">What you can do</div>
+            <div class="cm-card-text">
+                During the interview your interviewer will attach questions to the session.
+                You will see them in the session summary.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cm-grid-2" style="margin-top: 14px;">
+            <div class="cm-card">
+                <div class="cm-card-title">Filters</div>
+
+                <div class="cm-form-field" style="margin-top: 10px;">
+                    <label class="cm-label">Search</label>
+                    <input class="cm-input"
+                           placeholder="Search by title or body…"
+                           @bind="_search"
+                           @bind:event="oninput" />
+                </div>
+
+                <div class="cm-form-row-3" style="margin-top: 10px;">
+                    <div class="cm-form-field">
+                        <label class="cm-label">Level</label>
+                        <select class="cm-select" @bind="_level">
+                            <option value="">Any</option>
+                            @foreach (var lvl in Enum.GetValues<QuestionLevel>())
+                            {
+                                <option value="@lvl">@lvl</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Tag</label>
+                        <select class="cm-select" @bind="_tagId">
+                            <option value="">Any</option>
+                            @foreach (var t in _tags)
+                            {
+                                <option value="@t.Id">@t.Name</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Sort</label>
+                        <select class="cm-select" @bind="_sort">
+                            <option value="created_desc">Created (newest)</option>
+                            <option value="created_asc">Created (oldest)</option>
+                            <option value="title_asc">Title (A-Z)</option>
+                            <option value="title_desc">Title (Z-A)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="cm-form-actions" style="margin-top: 12px;">
+                    <button type="button" class="cm-btn-ghost" @onclick="ClearFilters" disabled="@_busy">
+                        Clear
+                    </button>
+
+                    <div style="flex:1;"></div>
+
+                    <button type="button" class="cm-btn-primary"
+                            @onclick="SearchAsync"
+                            disabled="@_busy">
+                        @(_busy ? "Searching..." : "Search")
+                    </button>
+                </div>
+
+                <div class="cm-field-hint" style="margin-top: 10px;">
+                    Total: @_questions.Count
+                </div>
+            </div>
+
+            <div class="cm-card">
+                <div class="cm-card-title">Notes</div>
+                <div class="cm-card-text" style="margin-top: 10px;">
+                    Use tags to group questions (C#, algorithms, SQL, system design).
+                    Keep question body clear and add expected edge cases.
+                </div>
+            </div>
+        </div>
+
+        <div class="cm-card" style="margin-top: 16px;">
+            <div class="cm-card-title">Questions</div>
+
+            @if (_questions.Count == 0)
+            {
+                <div class="cm-alert" style="margin-top: 10px;">
+                    No questions found.
+                </div>
+            }
+            else
+            {
+                <div class="cm-list" style="margin-top: 10px;">
+                    @foreach (var q in _questions)
+                    {
+                        <div class="cm-list-row">
+                            <div class="cm-list-main">
+                                <div class="cm-list-title">@q.Title</div>
+
+                                <div class="cm-list-subtitle">
+                                    Level: @q.Level
+                                    <span> - Created: @q.CreatedUtc.ToString("yyyy-MM-dd")</span>
+                                    @if (q.UpdatedUtc.HasValue)
+                                    {
+                                        <span> - Updated: @q.UpdatedUtc.Value.ToString("yyyy-MM-dd")</span>
+                                    }
+                                </div>
+
+                                <div class="cm-card-text" style="margin-top: 8px; white-space: pre-wrap;">
+                                    @TrimPreview(q.Body, 260)
+                                </div>
+
+                                @if (_questionTagNames.TryGetValue(q.Id, out var names) && names.Count > 0)
+                                {
+                                    <div style="margin-top: 10px; display:flex; flex-wrap:wrap; gap:8px;">
+                                        @foreach (var name in names.Take(10))
+                                        {
+                                            <span class="cm-hero-tag">@name</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="cm-list-actions">
+                                <button type="button" class="cm-btn-ghost cm-btn-xxs"
+                                        @onclick="@(() => OpenQuestion(q.Id))">
+                                    View
+                                </button>
+
+                                @if (_canManageQuestions)
+                                {
+                                    <button type="button" class="cm-btn-primary cm-btn-xxs"
+                                            @onclick="@(() => EditQuestion(q.Id))">
+                                        Edit
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+
+    private bool _hasOrg;
+    private bool _canManageQuestions;
+    private Guid _orgId;
+
+    private List<TagDto> _tags = new();
+    private List<QuestionDto> _questions = new();
+
+    // questionId -> tag names
+    private Dictionary<Guid, List<string>> _questionTagNames = new();
+
+    private string _search = string.Empty;
+    private QuestionLevel? _level;
+    private Guid? _tagId;
+    private string _sort = "created_desc";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _error = null;
+
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+
+            if (user.Identity is null || !user.Identity.IsAuthenticated)
+            {
+                _error = "You must be signed in.";
+                return;
+            }
+
+            var orgClaim = user.FindFirst("org_id")?.Value;
+            _hasOrg = Guid.TryParse(orgClaim, out var parsedOrg);
+            _orgId = parsedOrg;
+
+            _canManageQuestions = _hasOrg;
+
+            if (!_hasOrg)
+            {
+                _tags = new();
+                _questions = new();
+                _questionTagNames = new();
+                return;
+            }
+
+            _tags = (await TagService.GetByOrgAsync(_orgId, default)).ToList();
+
+            await SearchAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ClearFilters()
+    {
+        _search = string.Empty;
+        _level = null;
+        _tagId = null;
+        _sort = "created_desc";
+    }
+
+    private async Task SearchAsync()
+    {
+        if (!_hasOrg)
+            return;
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            IReadOnlyCollection<Guid>? tagIds = null;
+            if (_tagId.HasValue)
+                tagIds = new[] { _tagId.Value };
+
+            var searchTerm = string.IsNullOrWhiteSpace(_search) ? null : _search;
+
+            var list = await QuestionService.SearchInOrgAsync(
+                _orgId,
+                searchTerm,
+                tagIds,
+                _level,
+                default);
+
+            var q = ApplySort(list);
+            _questions = q.ToList();
+
+            await LoadTagsForQuestionsAsync(default);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private IEnumerable<QuestionDto> ApplySort(IEnumerable<QuestionDto> list)
+    {
+        return _sort switch
+        {
+            "created_asc" => list.OrderBy(x => x.CreatedUtc),
+            "title_asc" => list.OrderBy(x => x.Title),
+            "title_desc" => list.OrderByDescending(x => x.Title),
+            _ => list.OrderByDescending(x => x.CreatedUtc)
+        };
+    }
+
+    private async Task LoadTagsForQuestionsAsync(CancellationToken ct)
+    {
+        _questionTagNames = new();
+
+        if (_questions.Count == 0 || _tags.Count == 0)
+            return;
+
+        foreach (var q in _questions)
+        {
+            // если добавишь в QuestionDto свойство TagIds
+            // public IReadOnlyCollection<Guid>? TagIds { get; set; }
+            var tagIds = q.TagIds ?? Array.Empty<Guid>();
+
+            var names = _tags
+                .Where(t => tagIds.Contains(t.Id))
+                .Select(t => t.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (names.Count > 0)
+                _questionTagNames[q.Id] = names;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private void CreateQuestion()
+    {
+        if (!_canManageQuestions)
+            return;
+
+        Nav.NavigateTo("/questions/new");
+    }
+
+    private void OpenQuestion(Guid id)
+    {
+        Nav.NavigateTo($"/questions/{id}");
+    }
+
+    private void EditQuestion(Guid id)
+    {
+        if (!_canManageQuestions)
+            return;
+
+        Nav.NavigateTo($"/questions/{id}");
+    }
+
+    private static string TrimPreview(string s, int max)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+            return string.Empty;
+
+        var t = s.Trim();
+        return t.Length <= max ? t : t.Substring(0, max) + "…";
+    }
+}

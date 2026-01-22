@@ -1,0 +1,479 @@
+﻿@page "/sessions/{SessionId:guid}"
+@attribute [Authorize]
+
+@using System.Net.Http.Json
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using CodeMeet.BLL.DTOs.Sessions
+@using CodeMeet.BLL.DTOs.Participants
+@using CodeMeet.BLL.Services.Interfaces
+@using CodeMeet.DAL.Enums
+
+@inject ISessionService SessionService
+@inject IParticipantService ParticipantService
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">@(_session?.Title ?? "Session")</h1>
+            <p class="cm-page-subtitle">Session details.</p>
+        </div>
+
+        <div class="cm-form-actions">
+            <button class="cm-btn-ghost cm-btn-small" @onclick="Back">
+                ← Back
+            </button>
+
+            @if (_session?.Status == SessionStatus.Live)
+            {
+                <button class="cm-btn-primary cm-btn-small" @onclick="JoinLive">
+                    Join live
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="cm-alert cm-alert-error">@_error</div>
+    }
+    else if (_loading)
+    {
+        <p>Loading session…</p>
+    }
+    else if (_session is null)
+    {
+        <div class="cm-alert cm-alert-error">Session not found.</div>
+    }
+    else
+    {
+        @if (_canManageParticipants)
+        {
+            <div style="display:grid; grid-template-columns: 1.6fr 1fr; gap:24px; margin-top:16px;">
+                <div class="cm-admin-card">
+                    <h2 class="cm-section-title">Session info</h2>
+
+                    <div class="cm-grid-2" style="margin-top:12px;">
+                        <div>
+                            <div class="cm-field-hint">Status</div>
+                            <div class="cm-input-static"><span class="cm-tag">@_session.Status</span></div>
+                        </div>
+
+
+                        <div>
+                            <div class="cm-field-hint">Start (UTC)</div>
+                            <div class="cm-input-static">@(_session.ScheduledStartUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</div>
+                        </div>
+
+                        <div>
+                            <div class="cm-field-hint">End (UTC)</div>
+                            <div class="cm-input-static">@(_session.ScheduledEndUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:16px;">
+                        <h3 class="cm-section-title">Participants</h3>
+
+                        @if (_participants.Count == 0)
+                        {
+                            <div class="cm-alert">No participants yet.</div>
+                        }
+                        else
+                        {
+                            <table class="cm-table" style="margin-top: 10px;">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 110px;">Role</th>
+                                        <th>Person</th>
+                                        <th style="width: 140px;">UserId</th>
+                                        <th style="width: 120px;">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _participants)
+                                    {
+                                        <tr>
+                                            <td><span class="cm-tag">@p.Role</span></td>
+                                            <td>
+                                                <div>@(string.IsNullOrWhiteSpace(p.DisplayName) ? "(no name)" : p.DisplayName)</div>
+                                                <div class="cm-field-hint">@p.Email</div>
+                                            </td>
+                                            <td class="cm-input-static" style="font-size: 12px;">
+                                                @if (p.UserId.HasValue)
+                                                {
+                                                    <span title="@p.UserId">@ShortGuid(p.UserId.Value)</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="cm-field-hint">-</span>
+                                                }
+                                            </td>
+                                            <td><span class="cm-tag">@p.Status</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </div>
+
+                <div class="cm-admin-card">
+                    <h2 class="cm-section-title">Add participant</h2>
+
+                    @if (!string.IsNullOrEmpty(_formError))
+                    {
+                        <div class="cm-alert cm-alert-error">@_formError</div>
+                    }
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Role</label>
+                        <select class="cm-input" @bind="_newRole">
+                            <option value="">Select role…</option>
+                            <option value="@ParticipantRole.Candidate">Candidate</option>
+                            <option value="@ParticipantRole.Interviewer">Interviewer</option>
+                            <option value="@ParticipantRole.Observer">Observer</option>
+                        </select>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Search user (admin)</label>
+                        <input class="cm-input"
+                               placeholder="Type email…"
+                               @bind="_userSearch"
+                               @bind:event="oninput" />
+
+                        @if (_usersLoading)
+                        {
+                            <div class="cm-field-hint">Loading users…</div>
+                        }
+                        else if (!string.IsNullOrWhiteSpace(_userSearch))
+                        {
+                            var list = _filteredUsers.ToList();
+                            if (list.Count == 0)
+                            {
+                                <div class="cm-field-hint">No matches.</div>
+                            }
+                            else
+                            {
+                                <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+                                    @foreach (var u in list)
+                                    {
+                                        <button type="button"
+                                                class="cm-btn-ghost"
+                                                style="text-align:left;"
+                                                @onclick="@(() => SelectUser(u))">
+                                            <div style="font-size: 13px;">@u.Email</div>
+                                            <div class="cm-field-hint">@u.DisplayName</div>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">UserId (optional)</label>
+                        <input class="cm-input" @bind="_newUserIdString" />
+                        <div class="cm-field-hint">If set, participant will be linked to an existing user.</div>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Email</label>
+                        <input class="cm-input" @bind="_newEmail" />
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Display name</label>
+                        <input class="cm-input" @bind="_newDisplayName" />
+                    </div>
+
+                    <div class="cm-form-actions" style="margin-top: 12px;">
+                        <button class="cm-btn-primary"
+                                disabled="@_saving"
+                                @onclick="AddOrUpdateAsync">
+                            @(_saving ? "Saving..." : "Save participant")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="cm-admin-card" style="margin-top:16px;">
+                <h2 class="cm-section-title">Session info</h2>
+
+                <div class="cm-grid-2" style="margin-top:12px;">
+                    <div>
+                        <div class="cm-field-hint">Status</div>
+                        <div class="cm-input-static"><span class="cm-tag">@_session.Status</span></div>
+                    </div>
+
+                    <div>
+                        <div class="cm-field-hint">Start (UTC)</div>
+                        <div class="cm-input-static">@(_session.ScheduledStartUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</div>
+                    </div>
+
+                    <div>
+                        <div class="cm-field-hint">End (UTC)</div>
+                        <div class="cm-input-static">@(_session.ScheduledEndUtc?.ToString("yyyy-MM-dd HH:mm") ?? "-")</div>
+                    </div>
+                </div>
+
+                @if (!_isCandidate)
+                {
+                    <div style="margin-top:16px;">
+                        <h3 class="cm-section-title">Participants</h3>
+
+                        @if (_participants.Count == 0)
+                        {
+                            <div class="cm-alert">No participants yet.</div>
+                        }
+                        else
+                        {
+                            <table class="cm-table" style="margin-top: 10px;">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 110px;">Role</th>
+                                        <th>Person</th>
+                                        <th style="width: 120px;">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _participants)
+                                    {
+                                        <tr>
+                                            <td><span class="cm-tag">@p.Role</span></td>
+                                            <td>
+                                                <div>@(string.IsNullOrWhiteSpace(p.DisplayName) ? "(no name)" : p.DisplayName)</div>
+                                            </td>
+                                            <td><span class="cm-tag">@p.Status</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="cm-alert" style="margin-top:16px;">
+                        Participant list is hidden for candidates.
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public Guid SessionId { get; set; }
+
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private SessionDto? _session;
+    private bool _loading = true;
+    private string? _error;
+
+    private List<ParticipantDto> _participants = new();
+
+    private bool _canManageParticipants;
+    private bool _isCandidate;
+
+    private ParticipantRole? _newRole;
+    private string? _newUserIdString;
+    private string? _newEmail;
+    private string? _newDisplayName;
+    private bool _saving;
+    private string? _formError;
+
+    private bool _usersLoading;
+    private string _userSearch = string.Empty;
+    private List<UserItem> _allUsers = new();
+    private IEnumerable<UserItem> _filteredUsers =>
+        string.IsNullOrWhiteSpace(_userSearch)
+            ? Enumerable.Empty<UserItem>()
+            : _allUsers
+                .Where(u => u.Email.Contains(_userSearch, StringComparison.OrdinalIgnoreCase))
+                .Take(10);
+
+    private static string ShortGuid(Guid id)
+    {
+        var s = id.ToString();
+        return s.Length > 8 ? s[..8] + "…" : s;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateTask;
+            var user = authState.User;
+
+            if (user.Identity is null || !user.Identity.IsAuthenticated)
+            {
+                _error = "You must be signed in.";
+                return;
+            }
+
+            var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in user.Claims.Where(c => c.Type == ClaimTypes.Role || c.Type == "role"))
+                roles.Add(c.Value);
+
+            _canManageParticipants =
+                roles.Contains("OrgAdmin") ||
+                roles.Contains("Recruiter") ||
+                roles.Contains("HiringManager");
+
+            _session = await SessionService.GetByIdAsync(SessionId);
+            if (_session is null)
+            {
+                _error = "Session not found.";
+                return;
+            }
+
+            await LoadParticipantsAsync(user);
+
+            if (_canManageParticipants)
+                await LoadUsersAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load session: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadParticipantsAsync(ClaimsPrincipal user)
+    {
+        var list = await ParticipantService.GetBySessionAsync(SessionId);
+        _participants = list.ToList();
+
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            var me = _participants.FirstOrDefault(p => p.UserId.HasValue && p.UserId.Value == userId);
+            _isCandidate = me is not null && me.Role == ParticipantRole.Candidate;
+        }
+        else
+        {
+            _isCandidate = false;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        _usersLoading = true;
+
+        try
+        {
+            var users = await Http.GetFromJsonAsync<List<UserItem>>("/api/admin/users");
+            _allUsers = users ?? new List<UserItem>();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _usersLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SelectUser(UserItem user)
+    {
+        _newUserIdString = user.Id.ToString();
+        _newEmail = user.Email;
+        _newDisplayName = user.DisplayName;
+    }
+
+    private async Task AddOrUpdateAsync()
+    {
+        if (!_canManageParticipants)
+            return;
+
+        _formError = null;
+
+        if (_newRole is null)
+        {
+            _formError = "Role is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_newEmail) && string.IsNullOrWhiteSpace(_newUserIdString))
+        {
+            _formError = "Either Email or UserId is required.";
+            return;
+        }
+
+        Guid? userId = null;
+        if (!string.IsNullOrWhiteSpace(_newUserIdString))
+        {
+            if (!Guid.TryParse(_newUserIdString, out var parsed))
+            {
+                _formError = "UserId is not a valid GUID.";
+                return;
+            }
+
+            userId = parsed;
+        }
+
+        _saving = true;
+
+        try
+        {
+            var req = new AddOrUpdateParticipantRequest
+                {
+                    SessionId = SessionId,
+                    UserId = userId,
+                    Role = _newRole.Value,
+                    DisplayName = _newDisplayName,
+                    Email = _newEmail
+                };
+
+            await ParticipantService.AddOrUpdateAsync(req);
+
+            _newDisplayName = null;
+            _newEmail = null;
+            _newUserIdString = null;
+            _newRole = null;
+            _userSearch = string.Empty;
+
+            var authState = await AuthStateTask;
+            await LoadParticipantsAsync(authState.User);
+        }
+        catch (Exception ex)
+        {
+            _formError = $"Failed to save participant: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void JoinLive()
+    {
+        Nav.NavigateTo($"/sessions/{SessionId}/prejoin");
+    }
+
+    private void Back()
+    {
+        Nav.NavigateTo(_canManageParticipants ? "/sessions/admin" : "/sessions");
+    }
+
+    private sealed class UserItem
+    {
+        public Guid Id { get; set; }
+        public string Email { get; set; } = string.Empty;
+        public string? DisplayName { get; set; }
+    }
+}

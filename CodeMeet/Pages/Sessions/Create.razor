@@ -1,0 +1,444 @@
+﻿@page "/sessions/create"
+@using System.Net.Http.Json
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using CodeMeet.DAL.Enums
+
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Schedule interview session</h1>
+            <p class="cm-page-subtitle">
+                Create a new interview session, choose time and select who you are going to interview.
+            </p>
+        </div>
+
+        <button type="button"
+                class="cm-btn-ghost"
+                @onclick="BackToSessions">
+            Cancel
+        </button>
+    </div>
+
+    <div class="cm-admin-two-column">
+        <!-- Левая колонка: основная информация -->
+        <div class="cm-admin-card">
+            <h2 class="cm-section-title">Session details</h2>
+
+            <div class="cm-form-field">
+                <label class="cm-label">Title</label>
+                <input class="cm-input"
+                       placeholder="Acme – Frontend Developer"
+                       @bind="Model.Title" />
+                <div class="cm-field-hint">
+                    Short name of the interview. Example: "Senior .NET – take-home review".
+                </div>
+            </div>
+
+            <div class="cm-form-field">
+                <label class="cm-label">Start time (UTC)</label>
+                <input class="cm-input"
+                       type="datetime-local"
+                       @bind="Model.ScheduledStartLocal" />
+                <div class="cm-field-hint">
+                    Optional. If empty, session will stay in Draft state without schedule.
+                </div>
+            </div>
+
+            <div class="cm-form-field">
+                <label class="cm-label">End time (UTC, optional)</label>
+                <input class="cm-input"
+                       type="datetime-local"
+                       @bind="Model.ScheduledEndLocal" />
+            </div>
+
+            @* Организация скрыта от пользователя – просто используем первую доступную *@
+            @if (IsOrgsLoading)
+            {
+                <div class="cm-field-hint">Detecting workspace...</div>
+            }
+            else if (!string.IsNullOrEmpty(OrgError))
+            {
+                <div class="cm-alert cm-alert-error">@OrgError</div>
+            }
+            else if (CurrentOrg is not null)
+            {
+                <div class="cm-field-hint">
+                    Workspace: @CurrentOrg.Name
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(ErrorMessage))
+            {
+                <div class="cm-alert cm-alert-error">@ErrorMessage</div>
+            }
+
+            <div class="cm-form-actions">
+                <button type="button"
+                        class="cm-btn-primary"
+                        @onclick="CreateSessionAsync"
+                        disabled="@IsSubmitting">
+                    @(IsSubmitting ? "Scheduling..." : "Schedule session")
+                </button>
+
+                <button type="button"
+                        class="cm-btn-ghost"
+                        @onclick="BackToSessions">
+                    Cancel
+                </button>
+            </div>
+        </div>
+
+        <!-- Правая колонка: выбор кандидата -->
+        <div class="cm-admin-card">
+            <h2 class="cm-section-title">Candidate</h2>
+            <p class="cm-section-subtitle">
+                Pick a user you are going to interview. In this version the selected user
+                will be saved as a session participant.
+            </p>
+
+            <div class="cm-form-field">
+                <label class="cm-label">Search by email</label>
+                <input class="cm-input"
+                       placeholder="candidate@example.com"
+                       @bind="UserSearch"
+                       @bind:event="oninput" />
+            </div>
+
+            @if (IsUsersLoading)
+            {
+                <p class="cm-field-hint">Loading users...</p>
+            }
+            else if (FilteredUsers.Any())
+            {
+                <ul class="cm-list">
+                    @foreach (var u in FilteredUsers)
+                    {
+                        <li>
+                            <button type="button"
+                                    class="cm-link-button"
+                                    @onclick="() => SelectCandidate(u)">
+                                @u.Email (@u.DisplayName)
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+            else if (!string.IsNullOrWhiteSpace(UserSearch))
+            {
+                <p class="cm-field-hint">No users found for this email.</p>
+            }
+
+            <hr />
+
+            <p class="cm-label">Selected candidate</p>
+
+            @if (SelectedCandidate is null)
+            {
+                <p class="cm-field-hint">Not selected yet.</p>
+            }
+            else
+            {
+                <div class="cm-input-static">
+                    @SelectedCandidate.DisplayName (@SelectedCandidate.Email)
+                </div>
+                <p class="cm-field-hint">
+                    The selected candidate will be added to this session as a participant.
+                </p>
+            }
+        </div>
+    </div>
+</div>
+
+@code
+{
+    // --- Form state ---
+
+    private CreateSessionModel Model { get; set; } = new();
+
+    private bool IsSubmitting;
+    private string? ErrorMessage;
+
+    // --- Orgs ---
+
+    private bool IsOrgsLoading;
+    private string? OrgError;
+    private OrgItem? CurrentOrg;
+
+    // --- Users / candidate search ---
+
+    private bool IsUsersLoading;
+    private string UserSearch = string.Empty;
+    private List<UserItem> AllUsers { get; set; } = new();
+    private UserItem? SelectedCandidate;
+
+    private IEnumerable<UserItem> FilteredUsers =>
+        string.IsNullOrWhiteSpace(UserSearch)
+            ? Enumerable.Empty<UserItem>()
+            : AllUsers
+                .Where(u => u.Email.Contains(UserSearch, StringComparison.OrdinalIgnoreCase))
+                .Take(10);
+
+
+    [CascadingParameter]
+    public Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private Guid? _currentUserId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateTask;
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var idClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+                if (idClaim is not null && Guid.TryParse(idClaim.Value, out var userId))
+                {
+                    _currentUserId = userId;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        await LoadOrganizationsAsync();
+        await LoadUsersAsync();
+    }
+
+    private async Task LoadOrganizationsAsync()
+    {
+        IsOrgsLoading = true;
+        OrgError = null;
+
+        try
+        {
+            var orgs = await Http.GetFromJsonAsync<List<OrgItem>>("/api/admin/organizations");
+            if (orgs is { Count: > 0 })
+            {
+                CurrentOrg = orgs[0];
+                Model.OrgId = CurrentOrg.Id;
+            }
+            else
+            {
+                OrgError = "No organizations available. Create at least one organization in Admin.";
+            }
+        }
+        catch (Exception ex)
+        {
+            OrgError = $"Failed to load organizations: {ex.Message}";
+        }
+        finally
+        {
+            IsOrgsLoading = false;
+        }
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        IsUsersLoading = true;
+
+        try
+        {
+            var users = await Http.GetFromJsonAsync<List<UserItem>>("/api/admin/users");
+            AllUsers = users ?? new List<UserItem>();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            IsUsersLoading = false;
+        }
+    }
+
+    private async Task CreateSessionAsync()
+    {
+        ErrorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(Model.Title))
+        {
+            ErrorMessage = "Session title is required.";
+            return;
+        }
+
+        if (Model.OrgId == Guid.Empty)
+        {
+            ErrorMessage = "Workspace (organization) is not resolved. Check admin organizations.";
+            return;
+        }
+
+        IsSubmitting = true;
+
+        try
+        {
+            var payload = new CreateSessionRequestPayload
+                {
+                    OrgId = Model.OrgId,
+                    Title = Model.Title.Trim(),
+                    ScheduledStartUtc = ToUtc(Model.ScheduledStartLocal),
+                    ScheduledEndUtc = ToUtc(Model.ScheduledEndLocal),
+                    CreatedByUserId = _currentUserId ?? Guid.Empty
+                };
+
+            var response = await Http.PostAsJsonAsync("/api/sessions", payload);
+
+            if (response.IsSuccessStatusCode)
+            {
+                Guid? sessionId = null;
+
+                try
+                {
+                    var created = await response.Content.ReadFromJsonAsync<CreatedSessionResponse>();
+                    if (created is not null && created.Id != Guid.Empty)
+                        sessionId = created.Id;
+                }
+                catch
+                {
+                }
+
+                if (sessionId is Guid id && id != Guid.Empty)
+                {
+                    await AddParticipantsAsync(id);
+                }
+
+                Nav.NavigateTo("/sessions");
+            }
+            else
+            {
+                var text = await response.Content.ReadAsStringAsync();
+                ErrorMessage = string.IsNullOrWhiteSpace(text)
+                    ? $"Failed to create session (status {(int)response.StatusCode})."
+                    : text;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error while creating session: {ex.Message}";
+        }
+        finally
+        {
+            IsSubmitting = false;
+        }
+    }
+
+    // добавляем участников к только что созданной сессии
+    private async Task AddParticipantsAsync(Guid sessionId)
+    {
+        // 1 - кандидат, которого выбрали справа
+        if (SelectedCandidate is not null)
+        {
+            var candidateReq = new AddOrUpdateParticipantPayload
+                {
+                    UserId = SelectedCandidate.Id, // привязываем к существующему пользователю
+                    Email = SelectedCandidate.Email,
+                    DisplayName = SelectedCandidate.DisplayName,
+                    Role = ParticipantRole.Candidate
+                };
+
+            try
+            {
+                await Http.PostAsJsonAsync(
+                    $"/api/sessions/{sessionId}/participants",
+                    candidateReq);
+            }
+            catch (Exception ex)
+            {
+                ErrorMessage = $"Session created, but failed to add candidate: {ex.Message}";
+            }
+        }
+
+        // 2 - опционально добавляем создателя как интервьюера
+        if (_currentUserId is Guid currentUserId)
+        {
+            var interviewerReq = new AddOrUpdateParticipantPayload
+                {
+                    UserId = currentUserId,
+                    Email = null,
+                    DisplayName = null,
+                    Role = ParticipantRole.Interviewer
+                };
+
+            try
+            {
+                await Http.PostAsJsonAsync(
+                    $"/api/sessions/{sessionId}/participants",
+                    interviewerReq);
+            }
+            catch (Exception ex)
+            {
+                ErrorMessage = $"Session created, but failed to add interviewer: {ex.Message}";
+            }
+        }
+    }
+
+    private static DateTime? ToUtc(DateTime? local)
+    {
+        if (local is null)
+            return null;
+
+        var value = DateTime.SpecifyKind(local.Value, DateTimeKind.Local);
+        return value.ToUniversalTime();
+    }
+
+    private void BackToSessions() => Nav.NavigateTo("/sessions");
+
+    private void SelectCandidate(UserItem user)
+    {
+        SelectedCandidate = user;
+    }
+
+    // --- Local models (payload + view models) ---
+
+    private sealed class CreateSessionModel
+    {
+        public Guid OrgId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public DateTime? ScheduledStartLocal { get; set; }
+        public DateTime? ScheduledEndLocal { get; set; }
+    }
+
+    // Под это сериализуется JSON для /api/sessions
+    private sealed class CreateSessionRequestPayload
+    {
+        public Guid OrgId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public DateTime? ScheduledStartUtc { get; set; }
+        public DateTime? ScheduledEndUtc { get; set; }
+        public Guid CreatedByUserId { get; set; }
+    }
+
+    // Минимальный ответ от /api/sessions - нам нужен только Id
+    private sealed class CreatedSessionResponse
+    {
+        public Guid Id { get; set; }
+    }
+
+    private sealed class OrgItem
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class UserItem
+    {
+        public Guid Id { get; set; }
+        public string Email { get; set; } = string.Empty;
+        public string? DisplayName { get; set; }
+    }
+
+    // payload под /api/sessions/{sessionId}/participants
+    private sealed class AddOrUpdateParticipantPayload
+    {
+        public Guid? UserId { get; set; }
+        public ParticipantRole Role { get; set; }
+        public string? DisplayName { get; set; }
+        public string? Email { get; set; }
+    }
+}

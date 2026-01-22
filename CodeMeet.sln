@@ -1,0 +1,40 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeMeet.DAL", "CodeMeet.DAL\CodeMeet.DAL.csproj", "{983FAF68-5CEB-4C47-ACFD-BD0AC80B10F3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeMeet.BLL", "CodeMeet.BLL\CodeMeet.BLL.csproj", "{475829A1-9D9C-4E6A-8CA8-DBEB9D10F31A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeMeet", "CodeMeet\CodeMeet.csproj", "{6905F3BB-1001-46D4-A44C-CBB243C0AB2F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeMeet.Contracts", "CodeMeet.Contracts\CodeMeet.Contracts.csproj", "{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{983FAF68-5CEB-4C47-ACFD-BD0AC80B10F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{983FAF68-5CEB-4C47-ACFD-BD0AC80B10F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{983FAF68-5CEB-4C47-ACFD-BD0AC80B10F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{983FAF68-5CEB-4C47-ACFD-BD0AC80B10F3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{475829A1-9D9C-4E6A-8CA8-DBEB9D10F31A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{475829A1-9D9C-4E6A-8CA8-DBEB9D10F31A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{475829A1-9D9C-4E6A-8CA8-DBEB9D10F31A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{475829A1-9D9C-4E6A-8CA8-DBEB9D10F31A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6905F3BB-1001-46D4-A44C-CBB243C0AB2F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6905F3BB-1001-46D4-A44C-CBB243C0AB2F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6905F3BB-1001-46D4-A44C-CBB243C0AB2F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6905F3BB-1001-46D4-A44C-CBB243C0AB2F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

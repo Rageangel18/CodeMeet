@@ -1,0 +1,459 @@
+﻿@implements IDisposable
+@inject NavigationManager Nav
+@inject Microsoft.JSInterop.IJSRuntime JS
+
+
+@page "/"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout LandingLayout
+
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.WebUtilities
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+@inject CodeMeet.BLL.Services.Interfaces.IAuthService AuthService
+
+<section class="cm-landing">
+    <div class="cm-landing-hero-layout">
+        <div class="cm-landing-hero-text">
+            <div class="cm-landing-pill">
+                <span class="cm-pill-dot" aria-hidden="true"></span>
+                Technical interviews, reimagined
+            </div>
+
+            <h1 class="cm-landing-title">
+                Interview candidates<br />
+                <span class="cm-gradient-text">and give feedback in one System</span>
+            </h1>
+
+            <p class="cm-landing-subtitle">
+                Streamline your technical hiring with an all-in-one platform. Video calls
+                and structured feedback in one seamless experience.
+            </p>
+
+            <div class="cm-landing-actions">
+                <button type="button" class="cm-btn-primary" @onclick="OpenRegister">Start Free Trial</button>
+                <button type="button" class="cm-btn-secondary" @onclick="WatchDemo">Watch Demo</button>
+            </div>
+
+            <div class="cm-landing-badges" aria-label="Highlights">
+                <div class="cm-badge-item">
+                    <span class="cm-badge-icon" aria-hidden="true">🛡</span>
+                    GDPR Compliant
+                </div>
+                <div class="cm-badge-item">
+                    <span class="cm-badge-icon" aria-hidden="true">👥</span>
+                    500+ Companies
+                </div>
+                <div class="cm-badge-item">
+                    <span class="cm-badge-icon" aria-hidden="true">📈</span>
+                    99.9% Uptime
+                </div>
+            </div>
+        </div>
+
+        <div class="cm-landing-hero-preview" aria-label="Product preview">
+            <div class="cm-hero-card">
+                <div class="cm-hero-card-header">
+                    <div class="cm-hero-card-title">Live session</div>
+                    <div class="cm-hero-card-status">
+                        <span class="cm-status-dot" aria-hidden="true"></span>
+                        Active
+                    </div>
+                </div>
+
+                <div class="cm-hero-card-body">
+                    <div class="cm-hero-video">
+                        <div class="cm-video-avatar cm-video-avatar-left">A</div>
+                        <div class="cm-video-avatar cm-video-avatar-right">B</div>
+                        <div class="cm-video-timer">12:48</div>
+                    </div>
+
+                    <div class="cm-hero-panel">
+                        <div class="cm-hero-panel-header">
+                            <span>Collaborative editor</span>
+                            <span class="cm-hero-lang-pill">C#</span>
+                        </div>
+
+                        <div class="cm-hero-code">
+                            public interface ISessionService
+                            {
+                            Task RunAsync(SessionContext context);
+                            }
+
+                            public sealed class Feedback
+                            {
+                            public decimal Tech { get; set; }
+                            public decimal Comm { get; set; }
+                            }
+                        </div>
+
+                        <div class="cm-hero-footer">
+                            <span class="cm-hero-tag">Structured feedback</span>
+                            <span class="cm-hero-tag">Plan B sandbox</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cm-landing-section" id="features">
+        <div class="cm-section-head">
+            <h2 class="cm-section-title">Everything you need to hire better</h2>
+            <p class="cm-section-subtitle">
+                Powerful features designed for recruiters, interviewers, and candidates
+            </p>
+        </div>
+
+        <div class="cm-feature-grid">
+            <div class="cm-feature-card">
+                <div class="cm-feature-icon-box cm-ix-green">📹</div>
+                <div class="cm-feature-title">HD Video Calls</div>
+                <div class="cm-feature-text">
+                    Crystal-clear video conferencing. Camera, mic controls, and screen sharing built-in.
+                </div>
+            </div>
+
+            <div class="cm-feature-card">
+                <div class="cm-feature-icon-box cm-ix-teal">⌘</div>
+                <div class="cm-feature-title">Live Code Editor</div>
+                <div class="cm-feature-text">
+                    Collaborative editor with syntax highlighting, real-time cursors, and instant execution for C# and JavaScript.
+                </div>
+            </div>
+
+            <div class="cm-feature-card">
+                <div class="cm-feature-icon-box cm-ix-blue">👤</div>
+                <div class="cm-feature-title">Multi-user Sessions</div>
+                <div class="cm-feature-text">
+                    Invite multiple interviewers and candidates. Role-based permissions ensure everyone has the right access.
+                </div>
+            </div>
+
+            <div class="cm-feature-card">
+                <div class="cm-feature-icon-box cm-ix-indigo">📅</div>
+                <div class="cm-feature-title">Smart Scheduling</div>
+                <div class="cm-feature-text">
+                    Create sessions, send invitations, and manage interview pipelines. Email notifications keep everyone informed.
+                </div>
+            </div>
+
+            <div class="cm-feature-card">
+                <div class="cm-feature-icon-box cm-ix-amber">📊</div>
+                <div class="cm-feature-title">Structured Feedback</div>
+                <div class="cm-feature-text">
+                    Standardized evaluation forms with weighted scoring. Export reports to CSV/PDF for hiring decisions.
+                </div>
+            </div>
+
+            <div class="cm-feature-card">
+                <div class="cm-feature-icon-box cm-ix-mint">🛡</div>
+                <div class="cm-feature-title">Enterprise Security</div>
+                <div class="cm-feature-text">
+                    GDPR-aligned approach with encryption at rest and in transit. Audit logs track every action for compliance.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cm-landing-section" id="pricing">
+        <div class="cm-cta-card">
+            <h3 class="cm-cta-title">Ready to transform your interviews?</h3>
+            <p class="cm-cta-text">
+                Join teams using CodeMeet to hire top technical talent faster.
+            </p>
+            <div class="cm-cta-actions">
+                <button type="button" class="cm-btn-primary" @onclick="OpenRegister">Start Free Trial</button>
+                <button type="button" class="cm-btn-ghost" @onclick="OpenLogin">Sign In</button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_globalError))
+    {
+        <div class="cm-alert cm-alert-error">@_globalError</div>
+    }
+</section>
+
+@if (_showLogin)
+{
+    <div class="cm-modal-backdrop" @onclick="CloseModals">
+        <div class="cm-modal" @onclick:stopPropagation="true">
+            <div class="cm-modal-header">
+                <h2>Login</h2>
+                <button type="button" class="cm-modal-close" @onclick="CloseModals">×</button>
+            </div>
+
+            <div class="cm-modal-body">
+                @if (!string.IsNullOrWhiteSpace(_loginError))
+                {
+                    <div class="cm-alert cm-alert-error">@_loginError</div>
+                }
+
+                <div class="cm-form-field">
+                    <label>Email</label>
+                    <input @bind="_loginEmail" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Password</label>
+                    <input type="password" @bind="_loginPassword" />
+                </div>
+
+                <div class="cm-modal-actions">
+                    <button class="cm-btn-ghost" @onclick="SwitchToRegister">Register</button>
+                    <button class="cm-btn-primary" disabled="@_loginLoading" @onclick="DoLoginAsync">
+                        @(_loginLoading ? "Signing in..." : "Login")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showRegister)
+{
+    <div class="cm-modal-backdrop" @onclick="CloseModals">
+        <div class="cm-modal" @onclick:stopPropagation="true">
+            <div class="cm-modal-header">
+                <div class="cm-modal-title">Register</div>
+                <button class="cm-icon-btn" @onclick="CloseModals">×</button>
+            </div>
+
+            <div class="cm-modal-body">
+                @if (!string.IsNullOrWhiteSpace(_regError))
+                {
+                    <div class="cm-alert cm-alert-error">@_regError</div>
+                }
+
+                <div class="cm-form-field">
+                    <label>Email</label>
+                    <input @bind="_regEmail" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Display Name</label>
+                    <input @bind="_regDisplayName" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Password</label>
+                    <input type="password" @bind="_regPassword" />
+                </div>
+
+                <div class="cm-form-field">
+                    <label>Confirm Password</label>
+                    <input type="password" @bind="_regConfirmPassword" />
+                </div>
+
+                <div class="cm-modal-actions">
+                    <button class="cm-btn-ghost" @onclick="SwitchToLogin">Login</button>
+                    <button class="cm-btn-primary" disabled="@_regLoading" @onclick="DoRegisterAsync">
+                        @(_regLoading ? "Creating..." : "Register")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _showLogin;
+    private bool _showRegister;
+
+    private string? _globalError;
+
+    private string? _loginEmail;
+    private string? _loginPassword;
+    private string? _loginError;
+    private bool _loginLoading;
+
+    private string? _regEmail;
+    private string? _regDisplayName;
+    private string? _regPassword;
+    private string? _regConfirmPassword;
+    private string? _regError;
+    private bool _regLoading;
+
+    private bool _redirected;
+
+    protected override Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        TryOpenAuthFromQuery();
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _redirected)
+            return;
+
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (state.User?.Identity?.IsAuthenticated == true)
+        {
+            _redirected = true;
+            Nav.NavigateTo("/dashboard", replace: true);
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        TryOpenAuthFromQuery();
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
+    private void TryOpenAuthFromQuery()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        if (string.IsNullOrWhiteSpace(uri.Query))
+            return;
+
+        var q = QueryHelpers.ParseQuery(uri.Query);
+        if (!q.TryGetValue("auth", out var v))
+            return;
+
+        var mode = v.ToString();
+        if (string.Equals(mode, "login", StringComparison.OrdinalIgnoreCase))
+            OpenLogin();
+
+        if (string.Equals(mode, "register", StringComparison.OrdinalIgnoreCase))
+            OpenRegister();
+    }
+
+    private void WatchDemo()
+    {
+        // сюда можно прикрутить demo modal или Nav.NavigateTo("/demo")
+        _globalError = null;
+    }
+
+    private void OpenLogin()
+    {
+        _globalError = null;
+        _loginError = null;
+        _regError = null;
+
+        _showLogin = true;
+        _showRegister = false;
+
+        ClearAuthQuery();
+    }
+
+    private void OpenRegister()
+    {
+        _globalError = null;
+        _loginError = null;
+        _regError = null;
+
+        _showRegister = true;
+        _showLogin = false;
+
+        ClearAuthQuery();
+    }
+
+    private void ClearAuthQuery()
+    {
+        var uri = Nav.ToAbsoluteUri(Nav.Uri);
+        if (!string.IsNullOrWhiteSpace(uri.Query))
+            Nav.NavigateTo(uri.GetLeftPart(UriPartial.Path), replace: true);
+    }
+
+    private void CloseModals()
+    {
+        _showLogin = false;
+        _showRegister = false;
+    }
+
+    private void SwitchToRegister()
+    {
+        _loginError = null;
+        _showLogin = false;
+        _showRegister = true;
+    }
+
+    private void SwitchToLogin()
+    {
+        _regError = null;
+        _showRegister = false;
+        _showLogin = true;
+    }
+
+    private async Task DoLoginAsync()
+    {
+        _loginError = null;
+        _loginLoading = true;
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_loginEmail) || string.IsNullOrWhiteSpace(_loginPassword))
+            {
+                _loginError = "Email and password are required.";
+                return;
+            }
+
+            await JS.InvokeVoidAsync("codeMeetAuth.login", _loginEmail, _loginPassword);
+
+            await JS.InvokeVoidAsync("location.reload");
+        }
+        catch (Exception ex)
+        {
+            _loginError = ex.Message;
+        }
+        finally
+        {
+            _loginLoading = false;
+        }
+    }
+
+    private async Task DoRegisterAsync()
+    {
+        _regError = null;
+        _regLoading = true;
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_regEmail) || string.IsNullOrWhiteSpace(_regPassword))
+            {
+                _regError = "Email and password are required.";
+                return;
+            }
+
+            if (_regPassword != _regConfirmPassword)
+            {
+                _regError = "Passwords do not match.";
+                return;
+            }
+
+            var result = await AuthService.RegisterAsync(new CodeMeet.BLL.DTOs.Auth.RegisterRequest
+                {
+                    Email = _regEmail,
+                    DisplayName = _regDisplayName,
+                    Password = _regPassword
+                });
+
+            if (!result.Success)
+            {
+                _regError = result.Error ?? "Registration failed.";
+                return;
+            }
+
+            CloseModals();
+            Nav.NavigateTo("/dashboard", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _regError = ex.Message;
+        }
+        finally
+        {
+            _regLoading = false;
+        }
+    }
+}

@@ -1,0 +1,345 @@
+﻿@page "/questions/new"
+@page "/questions/{Id:guid}"
+
+@inject IOrganizationService OrganizationService
+@inject IQuestionService QuestionService
+@inject ITagService TagService
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthStateProvider
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components
+
+<section>
+    <header style="margin-bottom:16px;">
+        <h1 class="cm-page-header-title">
+            @_isNew ? "New question" : "Edit question"
+        </h1>
+        <p class="cm-page-header-subtitle">
+            Define question text, difficulty level and tags
+        </p>
+    </header>
+
+    @if (_loading)
+    {
+        <p>Loading...</p>
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <p style="color:#f97373;">@_error</p>
+    }
+    else if (_orgId == Guid.Empty)
+    {
+        <p>No organizations found. Create one first.</p>
+    }
+    else
+    {
+        <div class="cm-card" style="max-width:760px;">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <div>
+                    <label style="font-size:13px;">Title</label>
+                    <input type="text"
+                           @bind="_title"
+                           style="width:100%; margin-top:4px; padding:8px 10px; border-radius:8px;
+                                  border:1px solid var(--cm-border-light); background-color:var(--cm-surface);
+                                  color:var(--cm-text-main); font-size:13px;" />
+                </div>
+
+                <div>
+                    <label style="font-size:13px;">Body</label>
+                    <textarea @bind="_body"
+                              rows="6"
+                              style="width:100%; margin-top:4px; padding:8px 10px; border-radius:8px;
+                                     border:1px solid var(--cm-border-light); background-color:var(--cm-surface);
+                                     color:var(--cm-text-main); font-size:13px; resize:vertical;"></textarea>
+                </div>
+
+                <div>
+                    <label style="font-size:13px;">Difficulty</label>
+                    <select @bind="_level"
+                            style="margin-top:4px; padding:8px 10px; border-radius:8px;
+                                   border:1px solid var(--cm-border-light); background-color:var(--cm-surface);
+                                   color:var(--cm-text-main); font-size:13px;">
+                        @foreach (QuestionLevel lvl in Enum.GetValues(typeof(QuestionLevel)))
+                        {
+                            <option value="@lvl">@lvl</option>
+                        }
+                    </select>
+                </div>
+
+                <div>
+                    <label style="font-size:13px;">Tags</label>
+                    <div style="margin-top:4px; display:flex; flex-direction:column; gap:4px;">
+                        @if (_tags.Count == 0)
+                        {
+                            <span style="font-size:12px; color:var(--cm-text-muted);">
+                                No tags yet. Use the form below to create some.
+                            </span>
+                        }
+                        else
+                        {
+                            @foreach (var tag in _tags)
+                            {
+                                <label style="font-size:13px; display:flex; align-items:center; gap:6px;">
+                                    <input type="checkbox"
+                                           checked="@_selectedTagIds.Contains(tag.Id)"
+                                           @onchange="e => ToggleTag(tag.Id, (bool)e.Value!)" />
+                                    @tag.Name
+                                </label>
+                            }
+                        }
+                    </div>
+                </div>
+
+                <div style="border-top:1px solid var(--cm-border-light); padding-top:8px; margin-top:4px;">
+                    <label style="font-size:13px;">Add new tag</label>
+                    <div style="margin-top:4px; display:flex; gap:8px;">
+                        <input type="text"
+                               @bind="_newTagName"
+                               placeholder="Tag name"
+                               style="flex:1; padding:6px 8px; border-radius:8px;
+                                      border:1px solid var(--cm-border-light); background-color:var(--cm-bg);
+                                      color:var(--cm-text-main); font-size:13px;" />
+                        <button type="button"
+                                @onclick="CreateTag"
+                                style="padding:6px 10px; border-radius:8px; border:1px solid var(--cm-border-light);
+                                       background-color:var(--cm-surface); color:var(--cm-text-main); font-size:13px;">
+                            Add
+                        </button>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_tagError))
+                    {
+                        <div style="margin-top:4px; font-size:12px; color:#f97373;">@_tagError</div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_validationError))
+                {
+                    <div style="margin-top:4px; font-size:12px; color:#f97373;">@_validationError</div>
+                }
+
+                <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
+                    <button type="button"
+                            @onclick="Cancel"
+                            style="padding:8px 12px; border-radius:8px; border:1px solid var(--cm-border-light);
+                                   background-color:var(--cm-bg); color:var(--cm-text-main); font-size:13px;">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            @onclick="Save"
+                            style="padding:8px 12px; border-radius:8px; border:none;
+                                   background:linear-gradient(135deg, var(--cm-accent), var(--cm-accent-alt));
+                                   color:#ffffff; font-size:13px;">
+                        Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+</section>
+
+@code
+{
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool _isNew = true;
+    private bool _loading = true;
+    private string? _error;
+    private string? _validationError;
+
+    private Guid _orgId;
+
+    private string _title = string.Empty;
+    private string _body = string.Empty;
+    private QuestionLevel _level = QuestionLevel.Medium;
+
+    private List<TagDto> _tags = new();
+    private HashSet<Guid> _selectedTagIds = new();
+
+    private string _newTagName = string.Empty;
+    private string? _tagError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var orgs = await OrganizationService.GetListAsync();
+            var org = orgs.FirstOrDefault();
+            if (org == null)
+            {
+                _orgId = Guid.Empty;
+                return;
+            }
+
+            _orgId = org.Id;
+
+            // загрузить все теги организации
+            var orgTags = await TagService.GetByOrgAsync(_orgId);
+            _tags = orgTags.OrderBy(t => t.Name).ToList();
+
+            if (Id.HasValue)
+            {
+                _isNew = false;
+                var q = await QuestionService.GetByIdAsync(Id.Value);
+                if (q == null)
+                {
+                    _error = "Question not found.";
+                    return;
+                }
+
+                _title = q.Title;
+                _body = q.Body ?? string.Empty;
+                _level = q.Level;
+
+                var qTags = await TagService.GetForQuestionAsync(Id.Value);
+                _selectedTagIds = qTags.Select(t => t.Id).ToHashSet();
+            }
+            else
+            {
+                _isNew = true;
+                _level = QuestionLevel.Medium;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ToggleTag(Guid tagId, bool isChecked)
+    {
+        if (isChecked)
+        {
+            _selectedTagIds.Add(tagId);
+        }
+        else
+        {
+            _selectedTagIds.Remove(tagId);
+        }
+    }
+
+    private async Task CreateTag()
+    {
+        _tagError = null;
+
+        var name = _newTagName?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            _tagError = "Tag name cannot be empty.";
+            return;
+        }
+
+        try
+        {
+            var created = await TagService.CreateAsync(new CreateTagRequest
+                {
+                    OrgId = _orgId,
+                    Name = name
+                });
+
+            _tags.Add(created);
+            _tags = _tags.OrderBy(t => t.Name).ToList();
+            _selectedTagIds.Add(created.Id);
+            _newTagName = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _tagError = ex.Message;
+        }
+    }
+
+    private async Task Save()
+    {
+        _validationError = null;
+        _error = null;
+
+        var title = _title?.Trim() ?? string.Empty;
+        var body = _body?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            _validationError = "Title is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            _validationError = "Body is required.";
+            return;
+        }
+
+        // получаем текущего пользователя
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        if (user?.Identity is null || !user.Identity.IsAuthenticated)
+        {
+            _validationError = "You must be logged in to save questions.";
+            return;
+        }
+
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                          ?? user.FindFirst("sub")?.Value;
+
+        if (!Guid.TryParse(userIdClaim, out var userId) || userId == Guid.Empty)
+        {
+            _validationError = "Invalid current user.";
+            return;
+        }
+
+        try
+        {
+            Guid questionId;
+
+            if (_isNew)
+            {
+                var created = await QuestionService.CreateAsync(new CreateQuestionRequest
+                    {
+                        OrgId = _orgId,
+                        Title = title,
+                        Body = body,
+                        Level = _level,
+                        CreatedByUserId = userId
+                    });
+
+                questionId = created.Id;
+            }
+            else
+            {
+                if (!Id.HasValue)
+                {
+                    _error = "Invalid question id.";
+                    return;
+                }
+
+                await QuestionService.UpdateAsync(new UpdateQuestionRequest
+                    {
+                        Id = Id.Value,
+                        Title = title,
+                        Body = body,
+                        Level = _level
+                    });
+
+                questionId = Id.Value;
+            }
+
+            await TagService.SetTagsForQuestionAsync(questionId, _selectedTagIds.ToList());
+
+            Nav.NavigateTo("/questions");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+
+    private void Cancel()
+    {
+        Nav.NavigateTo("/questions");
+    }
+}

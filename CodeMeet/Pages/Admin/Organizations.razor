@@ -1,0 +1,231 @@
+﻿@page "/admin/organizations"
+
+@page "/admin/organizations/index"
+
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using CodeMeet.BLL.Dtos.Admin
+@using CodeMeet.BLL.Services.Admin
+@attribute [Authorize]
+
+@inject IAdminOrganizationService OrgService
+
+@inject NavigationManager Nav
+<PageTitle>Admin – Organizations</PageTitle>
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Organizations</h1>
+            <p class="cm-page-subtitle">
+                Manage organizations registered in CodeMeet.
+            </p>
+        </div>
+
+
+        <button type="button" class="cm-btn cm-btn-secondary" @onclick="StartCreate">
+            New organization
+        </button>
+    </div>
+
+    @if (isLoading)
+    {
+        <p>Loading organizations…</p>
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="cm-alert cm-alert-error">@errorMessage</div>
+    }
+    else
+    {
+        <div class="cm-admin-two-column">
+            <!-- List -->
+            <div class="cm-admin-card">
+                <h2 class="cm-card-title">All organizations</h2>
+
+                @if (organizations.Count == 0)
+                {
+                    <p>No organizations yet.</p>
+                }
+                else
+                {
+                    <table class="cm-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Slug</th>
+                                <th>Retention (days)</th>
+                                <th>Created</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var org in organizations)
+                            {
+                                <tr class="@GetRowClass(org.Id)">
+                                    <td>@org.Name</td>
+                                    <td>@org.Slug</td>
+                                    <td>@org.DataRetentionDays</td>
+                                    <td>@org.CreatedUtc.ToString("yyyy-MM-dd")</td>
+                                    <td>
+                                        <button type="button" class="cm-link-button" @onclick="() => StartEdit(org)">
+                                            Edit
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+
+            <!-- Form -->
+            <div class="cm-admin-card">
+                <h2 class="cm-card-title">
+                    @(editingId is null ? "Create organization" : "Edit organization")
+                </h2>
+
+                <EditForm Model="@form" OnValidSubmit="@HandleSubmit">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Name</label>
+                        <InputText class="cm-input" @bind-Value="form.Name" />
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Slug</label>
+                        <InputText class="cm-input" @bind-Value="form.Slug" />
+                        <div class="cm-field-hint">
+                            URL-safe code (for example: acme, internal-team).
+                        </div>
+                    </div>
+
+                    <div class="cm-form-field">
+                        <label class="cm-label">Data retention (days)</label>
+                        <InputNumber class="cm-input" @bind-Value="form.DataRetentionDays" />
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(formError))
+                    {
+                        <div class="cm-alert cm-alert-error">@formError</div>
+                    }
+
+                    <div class="cm-form-actions">
+                        <button type="button" class="cm-btn cm-btn-primary" disabled="@isSaving">
+                            @(editingId is null ? "Create" : "Save changes")
+                        </button>
+                        @if (editingId is not null)
+                        {
+                            <button class="cm-btn cm-btn-ghost" type="button" @onclick="CancelEdit" disabled="@isSaving">
+                                Cancel
+                            </button>
+                        }
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<AdminOrganizationDto> organizations = new();
+    private AdminOrganizationUpsertRequest form = new() { DataRetentionDays = 365 };
+    private Guid? editingId;
+    private bool isLoading;
+    private bool isSaving;
+    private string? errorMessage;
+    private string? formError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            var list = await OrgService.GetAllAsync();
+            organizations = list.ToList();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Failed to load organizations: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void StartCreate()
+    {
+        editingId = null;
+        form = new AdminOrganizationUpsertRequest
+            {
+                DataRetentionDays = 365
+            };
+        formError = null;
+    }
+
+    private void StartEdit(AdminOrganizationDto org)
+    {
+        editingId = org.Id;
+        form = new AdminOrganizationUpsertRequest
+            {
+                Name = org.Name,
+                Slug = org.Slug,
+                DataRetentionDays = org.DataRetentionDays
+            };
+        formError = null;
+    }
+
+    private void CancelEdit()
+    {
+        StartCreate();
+    }
+
+    private async Task HandleSubmit()
+    {
+        isSaving = true;
+        formError = null;
+
+        try
+        {
+            if (editingId is null)
+            {
+                var created = await OrgService.CreateAsync(form);
+                organizations.Add(created);
+                organizations = organizations
+                    .OrderBy(o => o.Name)
+                    .ToList();
+                StartCreate();
+            }
+            else
+            {
+                var updated = await OrgService.UpdateAsync(editingId.Value, form);
+                var idx = organizations.FindIndex(o => o.Id == updated.Id);
+                if (idx >= 0)
+                    organizations[idx] = updated;
+                StartCreate();
+            }
+        }
+        catch (Exception ex)
+        {
+            formError = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private string? GetRowClass(Guid id)
+        => editingId == id ? "cm-table-row-active" : null;
+}

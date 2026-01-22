@@ -1,0 +1,53 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager Nav
+
+<PageTitle>CodeMeet</PageTitle>
+
+<div class="@($"cm-public-shell {( _isLight ? "cm-theme-light" : "" )}")">
+    <header class="cm-header">
+        <div class="cm-header-left">
+            <div class="cm-logo" role="button" tabindex="0" style="cursor:pointer;" @onclick="@(() => Nav.NavigateTo("/"))">
+                <div class="cm-logo-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M10 20L14 4M18 8l4 4-4 4M6 16l-4-4 4-4"
+                              fill="none" stroke="currentColor" stroke-width="2"
+                              stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+                <div class="cm-logo-text">
+                    <span class="cm-logo-title">CodeMeet</span>
+                </div>
+            </div>
+
+            <nav class="cm-nav-main-public" aria-label="Primary">
+                <a class="cm-nav-link" href="#features">Features</a>
+                <a class="cm-nav-link" href="#pricing">Pricing</a>
+                <a class="cm-nav-link" href="#docs">Docs</a>
+            </nav>
+        </div>
+
+        <div class="cm-header-right">
+            <button type="button" class="cm-theme-toggle" title="Toggle theme" aria-label="Toggle theme" @onclick="ToggleTheme">
+                ☀
+            </button>
+
+            <button type="button" class="cm-header-btn" @onclick="@(() => Nav.NavigateTo("/?auth=login"))">
+                Sign In
+            </button>
+
+            <button type="button" class="cm-header-btn cm-header-btn-primary" @onclick="@(() => Nav.NavigateTo("/?auth=register"))">
+                Get Started
+            </button>
+        </div>
+    </header>
+
+    <main class="cm-landing-main">
+        @Body
+    </main>
+</div>
+
+@code {
+    private bool _isLight;
+
+    private void ToggleTheme() => _isLight = !_isLight;
+}

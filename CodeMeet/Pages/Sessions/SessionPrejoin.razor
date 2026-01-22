@@ -1,0 +1,200 @@
+﻿@page "/sessions/{SessionId:guid}/prejoin"
+@attribute [Authorize]
+
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="cm-page">
+    <div class="cm-page-header">
+        <div>
+            <h1 class="cm-page-title">Check your devices</h1>
+            <p class="cm-page-subtitle">
+                Select camera and preview before joining the interview.
+            </p>
+        </div>
+
+        <button class="cm-btn-ghost cm-btn-small"
+                @onclick="BackToSessions">
+            ← Back
+        </button>
+    </div>
+
+    <div class="cm-admin-two-column">
+        <!-- Левая колонка: превью -->
+        <div class="cm-admin-card">
+            <h2 class="cm-section-title">Preview</h2>
+            <p class="cm-section-subtitle">
+                Make sure everything looks fine before you join.
+            </p>
+
+            <div style="border-radius:16px; overflow:hidden; background:#020617; border:1px solid var(--cm-border-light);">
+                <video id="prejoinVideo"
+                       autoplay
+                       playsinline
+                       muted
+                       style="width:100%; height:320px; object-fit:cover; background:#000;">
+                </video>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="cm-alert cm-alert-error" style="margin-top:10px;">
+                    @_error
+                </div>
+            }
+        </div>
+
+        <!-- Правая колонка: выбор устройств -->
+        <div class="cm-admin-card">
+            <h2 class="cm-section-title">Devices</h2>
+
+            <div class="cm-form-field">
+                <label class="cm-label">Camera</label>
+
+                @if (_loadingDevices)
+                {
+                    <div class="cm-field-hint">Detecting devices…</div>
+                }
+                else if (_cameras.Count == 0)
+                {
+                    <div class="cm-alert cm-alert-error">
+                        No cameras detected. Check your browser permissions.
+                    </div>
+                }
+                else
+                {
+                    <select class="cm-input"
+                            @onchange="OnCameraChanged"
+                            value="@_selectedCameraId">
+                        @foreach (var cam in _cameras)
+                        {
+                            <option value="@cam.DeviceId">@cam.Label</option>
+                        }
+                    </select>
+                }
+            </div>
+
+            <div class="cm-field-hint" style="margin-bottom:12px;">
+                Your selection will be used when joining the call.
+            </div>
+
+            <div class="cm-form-actions">
+                <button class="cm-btn-primary"
+                        @onclick="JoinCallAsync"
+                        disabled="@(_joining || _cameras.Count == 0)">
+                    @(_joining ? "Joining…" : "Join call")
+                </button>
+
+                <button class="cm-btn-ghost"
+                        @onclick="BackToSessions">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid SessionId { get; set; }
+
+    private record VideoDevice(string DeviceId, string Label);
+
+    private List<VideoDevice> _cameras = new();
+    private string? _selectedCameraId;
+    private bool _loadingDevices = true;
+    private bool _joining;
+    private string? _error;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadDevicesAsync();
+        }
+    }
+
+    private async Task LoadDevicesAsync()
+    {
+        _loadingDevices = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            // Берём устройства через уже существующий videoTest.getVideoDevices
+            var devices = await JS.InvokeAsync<VideoDevice[]>("videoTest.getVideoDevices");
+            _cameras = devices?.ToList() ?? new List<VideoDevice>();
+
+            if (_cameras.Count > 0)
+            {
+                _selectedCameraId ??= _cameras[0].DeviceId;
+                await JS.InvokeVoidAsync("prejoinVideo.startPreview", _selectedCameraId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load devices: {ex.Message}";
+        }
+        finally
+        {
+            _loadingDevices = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnCameraChanged(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(id))
+            return;
+
+        _selectedCameraId = id;
+        await JS.InvokeVoidAsync("prejoinVideo.changeCamera", id);
+    }
+
+    private async Task JoinCallAsync()
+    {
+        if (_joining)
+            return;
+
+        _joining = true;
+
+        try
+        {
+            var cameraParam = string.IsNullOrEmpty(_selectedCameraId)
+                ? string.Empty
+                : $"camera={Uri.EscapeDataString(_selectedCameraId)}";
+
+            var qs = string.IsNullOrEmpty(cameraParam)
+                ? "autoJoin=1"
+                : $"{cameraParam}&autoJoin=1";
+
+            Nav.NavigateTo($"/sessions/{SessionId}/live?{qs}");
+        }
+        finally
+        {
+            _joining = false;
+        }
+    }
+
+
+    private void BackToSessions()
+    {
+        Nav.NavigateTo("/sessions/my");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("prejoinVideo.stopPreview");
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+}
