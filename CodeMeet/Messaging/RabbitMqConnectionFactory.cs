@@ -16,7 +16,6 @@ public static class RabbitMqConnectionFactory
             AutomaticRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
 
-            // На проде полезно
             RequestedHeartbeat = TimeSpan.FromSeconds(30),
             ClientProvidedName = "CodeMeet.MainApp"
         };

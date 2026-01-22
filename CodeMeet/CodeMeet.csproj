@@ -3,6 +3,7 @@
   <ItemGroup>
     <Content Remove="Pages\Admin\Index.razor" />
   </ItemGroup>
+	
 
   <ItemGroup>
     <None Remove=".env" />
@@ -39,6 +40,7 @@
     <Folder Include="Pages\Account\" />
   </ItemGroup>
 
+	
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>

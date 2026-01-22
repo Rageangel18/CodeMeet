@@ -130,10 +130,12 @@ builder.Services.AddSwaggerGen(options =>
 
 
 //---------- RabbitMQ Messaging ----------
-
-builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection("Rabbit"));
+builder.Services
+    .AddOptions<RabbitMqOptions>()
+    .Bind(builder.Configuration.GetSection("Rabbit"))
+    .ValidateOnStart();
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<RabbitMqOptions>>().Value);
-builder.Services.AddSingleton<IConnection>(sp =>
+builder.Services.AddSingleton(sp =>
 {
     var opt = sp.GetRequiredService<RabbitMqOptions>();
     return RabbitMqConnectionFactory.Create(opt);
@@ -150,6 +152,7 @@ builder.Services.AddSingleton(sp =>
 {
     var opt = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RabbitMqOptions>>().Value;
     var log = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>().CreateLogger("Rabbit");
+    var rabbitoptions = new RabbitMqOptions();
     log.LogInformation("Rabbit config: Host={Host} Port={Port} User={User} RunQueue={Run} CompletedQueue={Completed}",
         opt.Host, opt.Port, opt.User, opt.QueueRun, opt.QueueCompleted);
     return RabbitMqConnectionFactory.Create(opt);
@@ -158,6 +161,9 @@ builder.Services.AddSingleton(sp =>
 
 var app = builder.Build();
 
+var ropt = app.Services.GetRequiredService<RabbitMqOptions>();
+app.Logger.LogInformation("Rabbit: {Host}:{Port} user={User} run={Run} completed={Completed}",
+    ropt.Host, ropt.Port, ropt.User, ropt.QueueRun, ropt.QueueCompleted);
 // ---------- DB migrations at startup ----------
 
 using (var scope = app.Services.CreateScope())
