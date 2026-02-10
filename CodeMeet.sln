@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeMeet", "CodeMeet\CodeMe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeMeet.Contracts", "CodeMeet.Contracts\CodeMeet.Contracts.csproj", "{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodeMeet.Tests", "CodeMeet.Tests\CodeMeet.Tests.csproj", "{28F501C7-E83E-4994-8AE8-562E306D66AA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,6 +35,10 @@ Global
 		{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4EC28EF6-E792-4F01-9DE2-362F1000CDAD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{28F501C7-E83E-4994-8AE8-562E306D66AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{28F501C7-E83E-4994-8AE8-562E306D66AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{28F501C7-E83E-4994-8AE8-562E306D66AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{28F501C7-E83E-4994-8AE8-562E306D66AA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -227,7 +227,7 @@
                  (c.Type == "org_role" || c.Type == ClaimTypes.Role) &&
                  c.Value == "OrgAdmin"));
 
-        // Кандидат/гость – авторизован, но НЕ привязан к организации
+
         _isCandidateOnly = !_isOrgMember;
     }
 

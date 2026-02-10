@@ -6,11 +6,14 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using CodeMeet.BLL.Dtos.Admin
 @using CodeMeet.BLL.Services.Admin
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
 @attribute [Authorize]
 
 @inject IAdminUserService UserService
 
 @inject NavigationManager Nav
+
 <PageTitle>Admin – Users</PageTitle>
 
 <div class="cm-page">
@@ -123,6 +126,7 @@
 </div>
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
     private List<AdminUserDto> users = new();
     private AdminUserDto? selectedUser;
     private AdminUserUpdateRequest userForm = new();
@@ -133,7 +137,41 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (!await EnsureOrgAdminAsync())
+            return;
+
         await LoadAsync();
+    }
+
+    private async Task<bool> EnsureOrgAdminAsync()
+    {
+        var state = await AuthStateTask;
+        var user = state.User;
+
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            Nav.NavigateTo("/", forceLoad: true);
+            return false;
+        }
+
+        var orgClaim = user.FindFirst("org_id");
+        var isOrgMember = orgClaim != null && Guid.TryParse(orgClaim.Value, out _);
+
+        var isOrgAdmin =
+            isOrgMember &&
+            (user.IsInRole("OrgAdmin") ||
+             user.Claims.Any(c =>
+                 (c.Type == "org_role" || c.Type == ClaimTypes.Role) &&
+                 c.Value == "OrgAdmin"));
+
+        if (!isOrgAdmin)
+        {
+
+            Nav.NavigateTo("/", forceLoad: true);
+            return false;
+        }
+
+        return true;
     }
 
     private async Task LoadAsync()
